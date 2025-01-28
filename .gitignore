@@ -1,0 +1,57 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caches and logs
+*.log
+*.pyc
+*.swp
+*.bak
+*.tmp
+*.temp
+
+# Virtual environment
+venv/
+ENV/
+
+# Development tools
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Data directories
+ckpts/
+cls_imgs/
+dog/
+dogs/
+dogs_dift/
+masks/
+pdm_features/
+results/
+wandb/
+
+# Ignore all markdown files except the main README
+*.md
+!README.md
+
+# Python script outputs and utilities
+*.pickle
+*.csv
+*.json
+
+# Model files and checkpoints
+*.pt
+*.ckpt
+
+# OS generated files
+.DS_Store
+.DS_Store?
+
+# Ignore specific Python files that might contain sensitive info or are scripts for personal use
+train_dreambooth.py
+train_dreambooth_lora.py
