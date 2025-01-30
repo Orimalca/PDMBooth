@@ -46,8 +46,8 @@ BASE_CFG = (
 
     f"--use_pdm " +
 
+    f"--mask_pdm " +
     # f"--mask_dm " +
-    # f"--mask_pdm " +
     # f"--mask_prior " +
 
     f"--use_inst_loss --use_prior_loss --num_cls_imgs={MAX_TRAIN_STEPS} "
