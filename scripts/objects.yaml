@@ -1,5 +1,5 @@
-objects: # (subject_name, class, is it a live object or not)
-# Objects:
+objects: # (subject_name, class, is it a live object or not) - (NOTE: a total of 30 objects)
+# Objects: (21 objects)
   - ['backpack', 'backpack', '0']
   - ['backpack_dog', 'backpack', '0']
   - ['bear_plushie', 'stuffed animal', '0']
@@ -21,7 +21,7 @@ objects: # (subject_name, class, is it a live object or not)
   - ['teapot', 'teapot', '0']
   - ['vase', 'vase', '0']
   - ['wolf_plushie', 'stuffed animal', '0']
-# Live Subjects:
+# Live Subjects: (9 objects)
   - ['dog', 'dog', '1']
   - ['dog2', 'dog', '1']
   - ['dog3', 'dog', '1']
