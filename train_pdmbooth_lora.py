@@ -1147,24 +1147,59 @@ def main(args):
         # run inference
         hub_imgs = []
         with torch.no_grad():
+            logger.info(f"Running test... \n Generating {args.num_test_imgs_per_prompt} for {len(test_prompts)} different prompts:")
             if test_prompts and args.num_test_imgs_per_prompt > 0:
+                gen = torch.Generator(device=acc.device).manual_seed(args.seed) if args.seed else None
                 if args.report_to in ('wandb', 'all'):
-                    lpips_scores, clip_i_scores, clip_t_scores = [], [], []
-                    lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg').cuda()
-                    clip_score = CLIPScore(model_name_or_path="openai/clip-vit-base-patch32").cuda()
-                    clip_model, clip_processor = clip_score.model, clip_score.processor
+                    clip_d_scores, clip_i_scores, clip_t_scores = [],[],[]
+                    lpips_d_scores, lpips_i_scores = [],[]
+                    dino_d_scores, dino_i_scores = [],[]
+
+                    # Load metrics models
+                    lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg').to(acc.device)
+                    clip_score = CLIPScore(model_name_or_path="openai/clip-vit-base-patch32")
+                    clip_model, clip_processor = clip_score.model.to(acc.device), clip_score.processor
+                    dino_model = ViTModel.from_pretrained('facebook/dino-vits16').to(acc.device)
+                    dino_transforms = transforms.Compose([
+                        transforms.Resize(256, interpolation=3), transforms.CenterCrop(224),
+                        transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+                    ])
 
                     r_imgs = torch.stack([ds.img_transforms(im) for im in ds.pdm_imgs]).to(acc.device).clip(-1,1)
                     scaled_r_imgs = (r_imgs * 127.5 + 127.5).clip(0,255).to(torch.uint8) # [N,C,H,W]
 
                     proc_r_imgs = clip_processor(text=None, images=scaled_r_imgs, return_tensors="pt", padding=True)
-                    r_imgs_fs = clip_model.get_image_features(proc_r_imgs["pixel_values"].to('cuda'))
+                    r_imgs_fs = clip_model.get_image_features(proc_r_imgs["pixel_values"].to(acc.device))
                     r_imgs_fs /= r_imgs_fs.norm(p=2, dim=-1, keepdim=True)
+                    
+                    # Calc DINO embeddings for source images (example here https://github.com/google/dreambooth/issues/3)
+                    dino_imgs_s = [dino_transforms(exif_transpose(Image.open(p))) for p in ds.inst_imgs_path]
+                    dino_imgs_s = torch.stack(dino_imgs_s).to(acc.device)
+                    dino_out_s = dino_model(dino_imgs_s) # Get DINO features
+                    last_hidden_states_s = dino_out_s.last_hidden_state # ViT backbone features
+                    dino_embeds_s = last_hidden_states_s[:,0,:] # Get cls token (0-th token) for each img
+                    dino_embeds_s /= dino_embeds_s.norm(p=2, dim=-1, keepdim=True)
 
-                gen = torch.Generator(device=acc.device).manual_seed(args.seed) if args.seed else None
+                    ## PRES
+                    # Generate class images of random subjects with our trained model (using cls_prompt)
+                    with torch.autocast("cuda"):
+                        pres_imgs = [pipe(args.cls_prompt, num_inference_steps=50, generator=gen).images[0]
+                                    for _ in range(args.num_test_imgs_per_prompt)]
+                    dino_imgs_p = torch.stack([dino_transforms(im) for im in pres_imgs]).to(acc.device)
+                    # Calc DINO embeddings for generated class images of random subjects
+                    dino_out_p = dino_model(dino_imgs_p) # Get DINO features
+                    last_hidden_states_p = dino_out_p.last_hidden_state # ViT backbone features
+                    dino_embeds_p = last_hidden_states_p[:,0,:] # Get cls token (0-th token) for each img
+                    dino_embeds_p /= dino_embeds_p.norm(p=2, dim=-1, keepdim=True)
+                    # Calculate PRES metric
+                    pres_map = torch.matmul(dino_embeds_p, dino_embeds_s.T).clip(-1,1) # [-1,1]
+                    # pres_map = pres_map * 0.5 + 0.5 # [0,1]
+                    pres_score = pres_map.mean().item()
+                
                 for p in test_prompts:
-                    imgs = [pipe(p, num_inference_steps=50, generator=gen).images[0]
-                            for _ in range(args.num_test_imgs_per_prompt)]
+                    with torch.autocast("cuda"):
+                        imgs = [pipe(p, num_inference_steps=50, generator=gen).images[0]
+                                for _ in range(args.num_test_imgs_per_prompt)]
                     hub_imgs += imgs
 
                     for t in acc.trackers:
@@ -1174,44 +1209,92 @@ def main(args):
                         if t.name == "wandb":
                             # log images to wandb
                             t.log({"test": [wandb.Image(img, caption=f'{i}: {p}') for i,img in enumerate(imgs)]})
-                            # Clac Metrics
+
+                            ## Clac Metrics
+                            # extract DINO features for generated images
+                            dino_imgs_t = torch.stack([dino_transforms(im) for im in imgs]).to(acc.device)
+                            dino_out_t = dino_model(dino_imgs_t) # Get DINO features
+                            last_hidden_states_t = dino_out_t.last_hidden_state # ViT backbone features
+                            dino_embeds_t = last_hidden_states_t[:,0,:] # Get cls token (0-th token) for each img
+                            dino_embeds_t /= dino_embeds_t.norm(p=2, dim=-1, keepdim=True)
+                            
+                            # DINO-I (img-img)
+                            dino_i = torch.matmul(dino_embeds_t, dino_embeds_s.T).clip(-1,1) # [-1,1]
+                            # dino_i = dino_i * 0.5 + 0.5 # [0,1]
+                            dino_i_scores.append(dino_i.mean().item())
+
+                            # DINO-D (diversity metric)
+                            dino_d_map = torch.matmul(dino_embeds_t, dino_embeds_t.T).clip(-1,1)
+                            # dino_d_map = dino_d_map * 0.5 + 0.5 # [0,1]
+                            dino_d_map = torch.triu(dino_d_map, diagonal=1) # using only elements above the diagonal
+                            dino_d = dino_d_map[dino_d_map != 0]
+                            dino_d_scores.append(dino_d.mean().item())
+
+                            # prepare images for other metrics
                             t_imgs = torch.stack([ds.img_transforms(im) for im in imgs]).to(acc.device).clip(-1,1)
                             scaled_t_imgs = (t_imgs * 127.5 + 127.5).clip(0,255).to(torch.uint8) # [N,C,H,W]
                             # preprocess
                             proc_t_imgs = clip_processor(
                                 text=p, images=scaled_t_imgs, return_tensors="pt", padding=True)
                             # get img embeds
-                            t_imgs_fs = clip_model.get_image_features(proc_t_imgs["pixel_values"].to('cuda'))
+                            t_imgs_fs = clip_model.get_image_features(proc_t_imgs["pixel_values"].to(acc.device))
                             t_imgs_fs /= t_imgs_fs.norm(p=2, dim=-1, keepdim=True)
                             # get txt embeds
                             txt_fs = clip_model.get_text_features(
-                                proc_t_imgs["input_ids"].to('cuda'), proc_t_imgs["attention_mask"].to('cuda'))
+                                proc_t_imgs["input_ids"].to(acc.device), proc_t_imgs["attention_mask"].to(acc.device))
                             txt_fs /= txt_fs.norm(p=2, dim=-1, keepdim=True)
 
-                            # LPIPS (img-img)
-                            n_imgs = len(imgs) # num of generated images
-                            lpips_s = sum([
-                                lpips(t_imgs[i:i+1].repeat(r_imgs.shape[0],1,1,1), r_imgs).item() for i in range(n_imgs)
-                            ]) / n_imgs
-                            lpips_scores.append(lpips_s)
+                            n_gen_imgs = len(imgs) # num of generated images
+
+                            # LPIPS-I (img-img)
+                            # repeat both sets to match batch dimension of num_gen_imgs * num_source_imgs
+                            repeated_t_imgs = t_imgs.unsqueeze(1).repeat(1,r_imgs.shape[0],1,1,1).reshape(-1,3,512,512)
+                            repeated_r_imgs = r_imgs.repeat(n_gen_imgs,1,1,1)
+                            lpips_i = lpips(repeated_t_imgs, repeated_r_imgs)
+                            lpips_i_scores.append(lpips_i.item())
+
+                            # LPIPS-D (diversity metric)
+                            set1, set2 = [], []
+                            for i in range(n_gen_imgs-1):
+                                set1.append(t_imgs[i:i+1].repeat(n_gen_imgs-1-i,1,1,1))
+                                set2.append(t_imgs[i+1:])
+                            set1, set2 = torch.cat(set1, dim=0), torch.cat(set2, dim=0)
+                            lpips_d = lpips(set1, set2)
+                            lpips_d_scores.append(lpips_d.item())
+                            
+                            # CLIP-D (diversity metric)
+                            cs_d_map = torch.matmul(t_imgs_fs, t_imgs_fs.T).clip(-1,1)
+                            # cs_d_map = cs_d_map * 0.5 + 0.5 # [0,1]
+                            cs_d_map = torch.triu(cs_d_map, diagonal=1) # using only elements above the diagonal
+                            clip_d = cs_d_map[cs_d_map != 0]
+                            clip_d_scores.append(clip_d.mean().item())
+
                             # CLIP-I (img-img)
                             cs_i = torch.matmul(t_imgs_fs, r_imgs_fs.T).clip(-1,1) # [-1,1]
-                            scaled_cs_i = cs_i * 0.5 + 0.5 # [0,1]
-                            clip_i_scores.append(scaled_cs_i.mean().item())
+                            # cs_i = cs_i * 0.5 + 0.5 # [0,1]
+                            clip_i_scores.append(cs_i.mean().item())
                             # CLIP-T (txt-img)
                             cs_t = torch.matmul(t_imgs_fs, txt_fs.T).clip(-1,1) # [-1,1]
-                            scaled_cs_t = cs_t * 0.5 + 0.5 # [0,1]
-                            clip_t_scores.append(scaled_cs_t.mean().item())
+                            # cs_t = cs_t * 0.5 + 0.5 # [0,1]
+                            clip_t_scores.append(cs_t.mean().item())
                 
                 if args.report_to in ('wandb', 'all'): # log metrics to wandb
-                    del lpips.net, lpips, clip_score, clip_model, clip_processor
+                    del lpips, clip_score, clip_model, clip_processor, dino_model
                     torch.cuda.empty_cache(); gc.collect()
                     for t in acc.trackers:
                         if t.name == "wandb":
                             t.log({
-                                'LPIPS': sum(lpips_scores) / len(lpips_scores),
-                                'CLIP_I': sum(clip_i_scores) / len(clip_i_scores),
-                                'CLIP_T': sum(clip_t_scores) / len(clip_t_scores),
+                                'PRES': pres_score,
+                                # LPIPS
+                                'LPIPS-I': sum(lpips_i_scores) / len(lpips_i_scores),
+                                'LPIPS-D': sum(lpips_d_scores) / len(lpips_d_scores),
+                                # CLIP
+                                'CLIP-I': sum(clip_i_scores) / len(clip_i_scores),
+                                'CLIP-T': sum(clip_t_scores) / len(clip_t_scores),
+                                'CLIP-D': sum(clip_d_scores) / len(clip_d_scores),
+                                # DINO
+                                'DINO-I': sum(dino_i_scores) / len(dino_i_scores),
+                                'DINO-D': sum(dino_d_scores) / len(dino_d_scores),
                             })
 
         if args.push_to_hub:

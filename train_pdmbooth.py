@@ -159,8 +159,7 @@ def log_validation(text_encoder, tokenizer, unet, vae, args, acc, weight_dtype, 
 
 @torch.no_grad()
 def log_test(text_encoder, tokenizer, unet, vae, args, acc, weight_dtype, ds, test_prompts, epoch):
-    logger.info(
-        f"Running test... \n Generating {args.num_test_imgs_per_prompt} for {len(test_prompts)} different prompts:")
+    logger.info(f"Running test... \n Generating {args.num_test_imgs_per_prompt} for {len(test_prompts)} different prompts:")
     pipe_args = {'safety_checker': None}
     if vae is not None:
         pipe_args["vae"] = vae

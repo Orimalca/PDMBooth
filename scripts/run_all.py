@@ -38,18 +38,20 @@ UNIQUE_TOKEN = args.unique_token
 WANDB_PROJECT_NAME = f'PDMBooth-dreambooth-ds'
 MAX_TRAIN_STEPS = 700
 BASE_CFG = (
-    f"--lr=1e-6 --train_text_encoder --max_train_steps={MAX_TRAIN_STEPS} " +
+    f"--lr=1e-6 --train_text_encoder --max_train_steps=2 " +
     f"--train_batch_size=1 --lr_warmup_steps=0 --ckpting_steps={2*MAX_TRAIN_STEPS} " +
     f"--pretrained_model_name_or_path=runwayml/stable-diffusion-v1-5 " +    
-    f"--seed=0 --report_to=wandb --trackers_proj_name={WANDB_PROJECT_NAME} " +
+    f"--seed=0 " +
+    # f"--report_to=wandb --trackers_proj_name={WANDB_PROJECT_NAME} " +
 
-    f"--use_pdm " +
+    # f"--use_pdm " +
 
     # f"--mask_dm " +
     # f"--mask_pdm " +
     # f"--mask_prior " +
     
-    f"--use_inst_loss --use_prior_loss --num_cls_imgs={MAX_TRAIN_STEPS} --del_cls_imgs_dir "
+    # f"--del_cls_imgs_dir " + # NOTE: don't use if you create all cls_imgs dirs ahead.
+    f"--use_inst_loss --use_prior_loss --num_cls_imgs={MAX_TRAIN_STEPS} "
 )
 
 
