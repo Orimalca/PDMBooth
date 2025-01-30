@@ -44,14 +44,16 @@ from attention_store import AttentionStore
 import ptp_utils
 from transformers import SamModel, SamProcessor
 from torchvision.transforms.functional import crop as torchvision_crop
-from torchmetrics.multimodal.clip_score import CLIPScore
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 if is_wandb_available():
     import wandb
     import time
     from datetime import datetime
     from wandb.sdk.lib.runid import generate_id as wnb_generate_id
+    # metrics libraries
+    from torchmetrics.multimodal.clip_score import CLIPScore
+    from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+    from transformers import ViTModel
 check_min_version("0.18.0") # error if minimal version of diffusers not installed (remove at your own risks)
 logger = get_logger(__name__)
 
@@ -239,11 +241,13 @@ def parse_args(input_args=None):
         help="Include this argument to prevent storing PDM features when they are being generated")
     parser.add_argument("--use_inst_loss", default=False, action="store_true", help="Use instance loss.")
     parser.add_argument("--use_pdm_loss", default=False, action="store_true", help="Flag to add pdm loss.")
-    parser.add_argument("--pdm_loss_weight", type=float, default=0.1, help="The weight of pdm loss.")
+    parser.add_argument("--pdm_loss_weight", type=float, default=0.05, help="The weight of pdm loss.")
     parser.add_argument("--mask_pdm", default=False, action="store_true", help='Flag to mask pdm loss')
     parser.add_argument("--mask_dm", default=False, action="store_true", help='Flag to mask diffusion loss')
     parser.add_argument("--mask_prior", default=False, action="store_true", help='Flag to mask prior loss')
     parser.add_argument("--save_pdm_masks",default=False,action="store_true",help="Flag to save pdm masks.")
+    parser.add_argument("--del_cls_imgs_dir", default=False, action="store_true",
+        help="Whether to delete class images dir after training is done.")
     parser.add_argument("--trackers_proj_name", required=False, default='PDMBooth', help="Tracker project name.")
     parser.add_argument("--wandb_exp", required=False, default=None, help="Wandb experiment name.")
     parser.add_argument("--wandb_dir", required=False, default='', help="Wandb experiment dir name.")
@@ -1112,6 +1116,9 @@ def main(args):
 
     # Save the lora layers
     acc.wait_for_everyone()
+    # finished training so delete SAM (if not deleted yet). NOTE: needed when masking prior loss.
+    sam_model, sam_processor = None, None
+    torch.cuda.empty_cache(); gc.collect()
     if acc.is_main_process:
         unet = unet.to(torch.float32)
         unet_lora_layers = acc.unwrap_model(unet_lora_layers)
@@ -1133,81 +1140,89 @@ def main(args):
             if variance_type in ["learned", "learned_range"]:
                 variance_type = "fixed_small"
             scheduler_args["variance_type"] = variance_type
-
         pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, **scheduler_args)
         pipe = pipe.to(acc.device)
         pipe.load_lora_weights(args.out_dir) # load attention processors
+        
         # run inference
         hub_imgs = []
-        if test_prompts and args.num_test_imgs_per_prompt > 0:
-            lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg').cuda()
-            clip_score = CLIPScore(model_name_or_path="openai/clip-vit-base-patch32").cuda()
-            clip_model, clip_processor = clip_score.model, clip_score.processor
+        with torch.no_grad():
+            if test_prompts and args.num_test_imgs_per_prompt > 0:
+                if args.report_to in ('wandb', 'all'):
+                    lpips_scores, clip_i_scores, clip_t_scores = [], [], []
+                    lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg').cuda()
+                    clip_score = CLIPScore(model_name_or_path="openai/clip-vit-base-patch32").cuda()
+                    clip_model, clip_processor = clip_score.model, clip_score.processor
 
-            r_imgs = torch.stack([ds.img_transforms(im) for im in ds.pdm_imgs]).to(acc.device).clip(-1,1)
-            scaled_r_imgs = (r_imgs * 127.5 + 127.5).clip(0,255).to(torch.uint8) # [N,C,H,W]
+                    r_imgs = torch.stack([ds.img_transforms(im) for im in ds.pdm_imgs]).to(acc.device).clip(-1,1)
+                    scaled_r_imgs = (r_imgs * 127.5 + 127.5).clip(0,255).to(torch.uint8) # [N,C,H,W]
 
-            proc_r_imgs = clip_processor(text=None, images=scaled_r_imgs, return_tensors="pt", padding=True)
-            r_imgs_fs = clip_model.get_image_features(proc_r_imgs["pixel_values"].to('cuda'))
-            r_imgs_fs /= r_imgs_fs.norm(p=2, dim=-1, keepdim=True)
+                    proc_r_imgs = clip_processor(text=None, images=scaled_r_imgs, return_tensors="pt", padding=True)
+                    r_imgs_fs = clip_model.get_image_features(proc_r_imgs["pixel_values"].to('cuda'))
+                    r_imgs_fs /= r_imgs_fs.norm(p=2, dim=-1, keepdim=True)
 
-            lpips_scores, clip_i_scores, clip_t_scores = [], [], []
-            for p in test_prompts:
                 gen = torch.Generator(device=acc.device).manual_seed(args.seed) if args.seed else None
-                imgs = [pipe(p, num_inference_steps=50, generator=gen).images[0]
-                        for _ in range(args.num_test_imgs_per_prompt)]
-                hub_imgs += imgs
+                for p in test_prompts:
+                    imgs = [pipe(p, num_inference_steps=50, generator=gen).images[0]
+                            for _ in range(args.num_test_imgs_per_prompt)]
+                    hub_imgs += imgs
 
-                for t in acc.trackers:
-                    if t.name == "tensorboard":
-                        np_imgs = np.stack([np.asarray(img) for img in imgs])
-                        t.writer.add_images("test", np_imgs, epoch, dataformats="NHWC")
-                    if t.name == "wandb":
-                        # log images to wandb
-                        t.log({"test": [wandb.Image(img, caption=f'{i}: {p}') for i,img in enumerate(imgs)]})
-                        # Clac Metrics
-                        t_imgs = torch.stack([ds.img_transforms(im) for im in imgs]).to(acc.device).clip(-1,1)
-                        scaled_t_imgs = (t_imgs * 127.5 + 127.5).clip(0,255).to(torch.uint8) # [N,C,H,W]
-                        # preprocess
-                        proc_t_imgs = clip_processor(
-                            text=p, images=scaled_t_imgs, return_tensors="pt", padding=True)
-                        # get img embeds
-                        t_imgs_fs = clip_model.get_image_features(proc_t_imgs["pixel_values"].to('cuda'))
-                        t_imgs_fs /= t_imgs_fs.norm(p=2, dim=-1, keepdim=True)
-                        # get txt embeds
-                        txt_fs = clip_model.get_text_features(
-                            proc_t_imgs["input_ids"].to('cuda'), proc_t_imgs["attention_mask"].to('cuda'))
-                        txt_fs /= txt_fs.norm(p=2, dim=-1, keepdim=True)
+                    for t in acc.trackers:
+                        if t.name == "tensorboard":
+                            np_imgs = np.stack([np.asarray(img) for img in imgs])
+                            t.writer.add_images("test", np_imgs, epoch, dataformats="NHWC")
+                        if t.name == "wandb":
+                            # log images to wandb
+                            t.log({"test": [wandb.Image(img, caption=f'{i}: {p}') for i,img in enumerate(imgs)]})
+                            # Clac Metrics
+                            t_imgs = torch.stack([ds.img_transforms(im) for im in imgs]).to(acc.device).clip(-1,1)
+                            scaled_t_imgs = (t_imgs * 127.5 + 127.5).clip(0,255).to(torch.uint8) # [N,C,H,W]
+                            # preprocess
+                            proc_t_imgs = clip_processor(
+                                text=p, images=scaled_t_imgs, return_tensors="pt", padding=True)
+                            # get img embeds
+                            t_imgs_fs = clip_model.get_image_features(proc_t_imgs["pixel_values"].to('cuda'))
+                            t_imgs_fs /= t_imgs_fs.norm(p=2, dim=-1, keepdim=True)
+                            # get txt embeds
+                            txt_fs = clip_model.get_text_features(
+                                proc_t_imgs["input_ids"].to('cuda'), proc_t_imgs["attention_mask"].to('cuda'))
+                            txt_fs /= txt_fs.norm(p=2, dim=-1, keepdim=True)
 
-                        # LPIPS (img-img)
-                        n_imgs = len(imgs) # num of generated images
-                        lpips_s = sum([
-                            lpips(t_imgs[i:i+1,:,:,:].repeat(r_imgs.shape[0],1,1,1), r_imgs).item() for i in range(n_imgs)
-                        ]) / n_imgs
-                        lpips_scores.append(lpips_s)
-                        # CLIP-I (img-img)
-                        cs_i = torch.matmul(t_imgs_fs, r_imgs_fs.T).clip(-1,1) # [-1,1]
-                        scaled_cs_i = cs_i * 0.5 + 0.5 # [0,1]
-                        clip_i_scores.append(scaled_cs_i.mean().item())
-                        # CLIP-T (txt-img)
-                        cs_t = torch.matmul(t_imgs_fs, txt_fs.T).clip(-1,1) # [-1,1]
-                        scaled_cs_t = cs_t * 0.5 + 0.5 # [0,1]
-                        clip_t_scores.append(scaled_cs_t.mean().item())
-            # log metrics to wandb
-            if args.report_to in ('wandb', 'all'):
-                for t in acc.trackers:
-                    if t.name == "wandb":
-                        t.log({
-                            'LPIPS': sum(lpips_scores) / len(lpips_scores),
-                            'CLIP_I': sum(clip_i_scores) / len(clip_i_scores),
-                            'CLIP_T': sum(clip_t_scores) / len(clip_t_scores),
-                        })
+                            # LPIPS (img-img)
+                            n_imgs = len(imgs) # num of generated images
+                            lpips_s = sum([
+                                lpips(t_imgs[i:i+1].repeat(r_imgs.shape[0],1,1,1), r_imgs).item() for i in range(n_imgs)
+                            ]) / n_imgs
+                            lpips_scores.append(lpips_s)
+                            # CLIP-I (img-img)
+                            cs_i = torch.matmul(t_imgs_fs, r_imgs_fs.T).clip(-1,1) # [-1,1]
+                            scaled_cs_i = cs_i * 0.5 + 0.5 # [0,1]
+                            clip_i_scores.append(scaled_cs_i.mean().item())
+                            # CLIP-T (txt-img)
+                            cs_t = torch.matmul(t_imgs_fs, txt_fs.T).clip(-1,1) # [-1,1]
+                            scaled_cs_t = cs_t * 0.5 + 0.5 # [0,1]
+                            clip_t_scores.append(scaled_cs_t.mean().item())
+                
+                if args.report_to in ('wandb', 'all'): # log metrics to wandb
+                    del lpips.net, lpips, clip_score, clip_model, clip_processor
+                    torch.cuda.empty_cache(); gc.collect()
+                    for t in acc.trackers:
+                        if t.name == "wandb":
+                            t.log({
+                                'LPIPS': sum(lpips_scores) / len(lpips_scores),
+                                'CLIP_I': sum(clip_i_scores) / len(clip_i_scores),
+                                'CLIP_T': sum(clip_t_scores) / len(clip_t_scores),
+                            })
 
         if args.push_to_hub:
             save_model_card(repo_id, imgs=hub_imgs, base_model=args.pretrained_model_name_or_path, pipe=pipe,
                             prompt=args.inst_prompt, train_text_encoder=args.train_text_encoder, repo_folder=args.out_dir)
             upload_folder(repo_id=repo_id, folder_path=args.out_dir, commit_message="End of training",
                           ignore_patterns=["step_*", "epoch_*"])
+
+        if all([args.del_cls_imgs_dir, args.use_prior_loss, args.num_cls_imgs > 0,
+                args.cls_data_dir is not None, os.listdir(args.cls_data_dir)]):
+            shutil.rmtree(args.cls_data_dir)
 
     acc.end_training()
 

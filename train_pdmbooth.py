@@ -40,14 +40,16 @@ from attention_store import AttentionStore
 import ptp_utils
 from transformers import SamModel, SamProcessor
 from torchvision.transforms.functional import crop as torchvision_crop
-from torchmetrics.multimodal.clip_score import CLIPScore
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 if is_wandb_available():
     import wandb
     import time
     from datetime import datetime
     from wandb.sdk.lib.runid import generate_id as wnb_generate_id
+    # metrics libraries
+    from torchmetrics.multimodal.clip_score import CLIPScore
+    from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+    from transformers import ViTModel
 check_min_version("0.18.0") # check if diffusers's minimal version not installed (remove at your own risks)
 logger = get_logger(__name__)
 
@@ -108,7 +110,7 @@ def log_validation(text_encoder, tokenizer, unet, vae, args, acc, weight_dtype, 
     logger.info(
         f"Running validation... \n Generating {args.num_val_imgs} images with prompt: {args.val_prompt}.")
 
-    pipe_args = {}
+    pipe_args = {'safety_checker': None}
     if vae is not None:
         pipe_args["vae"] = vae
     text_encoder = acc.unwrap_model(text_encoder) if text_encoder is not None else None
@@ -136,7 +138,7 @@ def log_validation(text_encoder, tokenizer, unet, vae, args, acc, weight_dtype, 
     if args.val_imgs is None: # run inference
         for _ in range(args.num_val_imgs):
             with torch.autocast("cuda"):
-                img = pipe(**pipe_args, num_inference_steps=25, generator=gen).images[0]
+                img = pipe(**pipe_args, num_inference_steps=50, generator=gen).images[0]
             imgs.append(img)
     else:
         for img in args.val_imgs:
@@ -153,6 +155,184 @@ def log_validation(text_encoder, tokenizer, unet, vae, args, acc, weight_dtype, 
     
     del pipe; torch.cuda.empty_cache(); gc.collect()
     return imgs
+
+
+def log_test(text_encoder, tokenizer, unet, vae, args, acc, weight_dtype, ds, test_prompts, epoch):
+    logger.info(
+        f"Running test... \n Generating {args.num_test_imgs_per_prompt} for {len(test_prompts)} different prompts:")
+    pipe_args = {'safety_checker': None}
+    if vae is not None:
+        pipe_args["vae"] = vae
+    text_encoder = acc.unwrap_model(text_encoder) if text_encoder is not None else None
+    pipe = DiffusionPipeline.from_pretrained(
+        args.pretrained_model_name_or_path, tokenizer=tokenizer, text_encoder=text_encoder,
+        unet=acc.unwrap_model(unet), revision=args.revision, torch_dtype=weight_dtype, **pipe_args)
+    # We train on the simplified learning objective. If we were previously predicting a variance, we need the scheduler to ignore it
+    scheduler_args = {}
+    if "variance_type" in pipe.scheduler.config:
+        variance_type = pipe.scheduler.config.variance_type
+        if variance_type in ["learned", "learned_range"]:
+            variance_type = "fixed_small"
+        scheduler_args["variance_type"] = variance_type
+    pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, **scheduler_args)
+    pipe = pipe.to(acc.device)
+    pipe.set_progress_bar_config(disable=True)
+
+    gen = torch.Generator(device=acc.device).manual_seed(args.seed) if args.seed else None
+    all_imgs = []
+
+    if args.report_to in ('wandb', 'all'):
+        clip_d_scores, clip_i_scores, clip_t_scores = [],[],[]
+        lpips_d_scores, lpips_i_scores = [],[]
+        dino_d_scores, dino_i_scores = [],[]
+
+        # Load metrics models
+        lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg').to(acc.device)
+        clip_score = CLIPScore(model_name_or_path="openai/clip-vit-base-patch32")
+        clip_model, clip_processor = clip_score.model.to(acc.device), clip_score.processor
+        dino_model = ViTModel.from_pretrained('facebook/dino-vits16').to(acc.device)
+        dino_transforms = transforms.Compose([
+            transforms.Resize(256, interpolation=3), transforms.CenterCrop(224),
+            transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+
+        r_imgs = torch.stack([ds.img_transforms(im) for im in ds.pdm_imgs]).to(acc.device).clip(-1,1)
+        scaled_r_imgs = (r_imgs * 127.5 + 127.5).clip(0,255).to(torch.uint8) # [N,C,H,W]
+
+        proc_r_imgs = clip_processor(text=None, images=scaled_r_imgs, return_tensors="pt", padding=True)
+        r_imgs_fs = clip_model.get_image_features(proc_r_imgs["pixel_values"].to(acc.device))
+        r_imgs_fs /= r_imgs_fs.norm(p=2, dim=-1, keepdim=True)
+
+        # Calc DINO embeddings for source images (example here https://github.com/google/dreambooth/issues/3)
+        dino_imgs_s = [dino_transforms(exif_transpose(Image.open(p))) for p in ds.inst_imgs_path]
+        dino_imgs_s = torch.stack(dino_imgs_s).to(acc.device)
+        with torch.no_grad():
+            dino_out_s = dino_model(dino_imgs_s) # Get DINO features
+        last_hidden_states_s = dino_out_s.last_hidden_state # ViT backbone features
+        dino_embeds_s = last_hidden_states_s[:,0,:] # Get cls token (0-th token) for each img
+        dino_embeds_s /= dino_embeds_s.norm(p=2, dim=-1, keepdim=True)
+
+        ## PRES
+        # Generate class images of random subjects with our trained model (using cls_prompt)
+        with torch.autocast("cuda"):
+            pres_imgs = [pipe(args.cls_prompt, num_inference_steps=50, generator=gen).images[0]
+                         for _ in range(args.num_test_imgs_per_prompt)]
+        dino_imgs_p = torch.stack([dino_transforms(im) for im in pres_imgs]).to(acc.device)
+        # Calc DINO embeddings for generated class images of random subjects
+        with torch.no_grad():
+            dino_out_p = dino_model(dino_imgs_p) # Get DINO features
+        last_hidden_states_p = dino_out_p.last_hidden_state # ViT backbone features
+        dino_embeds_p = last_hidden_states_p[:,0,:] # Get cls token (0-th token) for each img
+        dino_embeds_p /= dino_embeds_p.norm(p=2, dim=-1, keepdim=True)
+        # Calculate PRES metric
+        pres_map = torch.matmul(dino_embeds_p, dino_embeds_s.T).clip(-1,1) # [-1,1]
+        # pres_map = pres_map * 0.5 + 0.5 # [0,1]
+        pres_score = pres_map.mean().item()
+
+    for p in test_prompts:
+        with torch.autocast("cuda"):
+            imgs = [pipe(p, num_inference_steps=50, generator=gen).images[0]
+                    for _ in range(args.num_test_imgs_per_prompt)]
+        all_imgs += imgs
+
+        for t in acc.trackers:
+            if t.name == "tensorboard":
+                np_imgs = np.stack([np.asarray(img) for img in imgs])
+                t.writer.add_images("test", np_imgs, epoch, dataformats="NHWC")
+            if t.name == "wandb":
+                # log images to wandb
+                t.log({"test": [wandb.Image(img, caption=f'{i}: {p}') for i,img in enumerate(imgs)]})
+
+                ## Clac Metrics
+                # extract DINO features for generated images
+                dino_imgs_t = torch.stack([dino_transforms(im) for im in imgs]).to(acc.device)
+                with torch.no_grad():
+                    dino_out_t = dino_model(dino_imgs_t) # Get DINO features
+                last_hidden_states_t = dino_out_t.last_hidden_state # ViT backbone features
+                dino_embeds_t = last_hidden_states_t[:,0,:] # Get cls token (0-th token) for each img
+                dino_embeds_t /= dino_embeds_t.norm(p=2, dim=-1, keepdim=True)
+                
+                # DINO-I (img-img)
+                dino_i = torch.matmul(dino_embeds_t, dino_embeds_s.T).clip(-1,1) # [-1,1]
+                # dino_i = dino_i * 0.5 + 0.5 # [0,1]
+                dino_i_scores.append(dino_i.mean().item())
+
+                # DINO-D (diversity metric)
+                dino_d_map = torch.matmul(dino_embeds_t, dino_embeds_t.T).clip(-1,1)
+                # dino_d_map = dino_d_map * 0.5 + 0.5 # [0,1]
+                dino_d_map = torch.triu(dino_d_map, diagonal=1) # using only elements above the diagonal
+                dino_d = dino_d_map[dino_d_map != 0]
+                dino_d_scores.append(dino_d.mean().item())
+
+                # prepare images for other metrics
+                t_imgs = torch.stack([ds.img_transforms(im) for im in imgs]).to(acc.device).clip(-1,1)
+                scaled_t_imgs = (t_imgs * 127.5 + 127.5).clip(0,255).to(torch.uint8) # [N,C,H,W]
+                # preprocess
+                proc_t_imgs = clip_processor(
+                    text=p, images=scaled_t_imgs, return_tensors="pt", padding=True)
+                # get img embeds
+                t_imgs_fs = clip_model.get_image_features(proc_t_imgs["pixel_values"].to(acc.device))
+                t_imgs_fs /= t_imgs_fs.norm(p=2, dim=-1, keepdim=True)
+                # get txt embeds
+                txt_fs = clip_model.get_text_features(
+                    proc_t_imgs["input_ids"].to(acc.device), proc_t_imgs["attention_mask"].to(acc.device))
+                txt_fs /= txt_fs.norm(p=2, dim=-1, keepdim=True)
+
+                n_gen_imgs = len(imgs) # num of generated images
+
+                # LPIPS-I (img-img)
+                # repeat both sets to match batch dimension of num_gen_imgs * num_source_imgs
+                repeated_t_imgs = t_imgs.unsqueeze(1).repeat(1,r_imgs.shape[0],1,1,1).reshape(-1,3,512,512)
+                repeated_r_imgs = r_imgs.repeat(n_gen_imgs,1,1,1)
+                lpips_i = lpips(repeated_t_imgs, repeated_r_imgs)
+                lpips_i_scores.append(lpips_i.item())
+
+                # LPIPS-D (diversity metric)
+                set1, set2 = [], []
+                for i in range(n_gen_imgs-1):
+                    set1.append(t_imgs[i:i+1].repeat(n_gen_imgs-1-i,1,1,1))
+                    set2.append(t_imgs[i+1:])
+                set1, set2 = torch.cat(set1, dim=0), torch.cat(set2, dim=0)
+                lpips_d = lpips(set1, set2)
+                lpips_d_scores.append(lpips_d.item())
+                
+                # CLIP-D (diversity metric)
+                cs_d_map = torch.matmul(t_imgs_fs, t_imgs_fs.T).clip(-1,1)
+                # cs_d_map = cs_d_map * 0.5 + 0.5 # [0,1]
+                cs_d_map = torch.triu(cs_d_map, diagonal=1) # using only elements above the diagonal
+                clip_d = cs_d_map[cs_d_map != 0]
+                clip_d_scores.append(clip_d.mean().item())
+
+                # CLIP-I (img-img)
+                cs_i = torch.matmul(t_imgs_fs, r_imgs_fs.T).clip(-1,1) # [-1,1]
+                # cs_i = cs_i * 0.5 + 0.5 # [0,1]
+                clip_i_scores.append(cs_i.mean().item())
+                # CLIP-T (txt-img)
+                cs_t = torch.matmul(t_imgs_fs, txt_fs.T).clip(-1,1) # [-1,1]
+                # cs_t = cs_t * 0.5 + 0.5 # [0,1]
+                clip_t_scores.append(cs_t.mean().item())
+    
+    if args.report_to in ('wandb', 'all'): # log metrics to wandb
+        del lpips, clip_score, clip_model, clip_processor, dino_model
+        torch.cuda.empty_cache(); gc.collect()
+        for t in acc.trackers:
+            if t.name == "wandb":
+                t.log({
+                    'PRES': pres_score,
+                    # LPIPS
+                    'LPIPS-I': sum(lpips_i_scores) / len(lpips_i_scores),
+                    'LPIPS-D': sum(lpips_d_scores) / len(lpips_d_scores),
+                    # CLIP
+                    'CLIP-I': sum(clip_i_scores) / len(clip_i_scores),
+                    'CLIP-T': sum(clip_t_scores) / len(clip_t_scores),
+                    'CLIP-D': sum(clip_d_scores) / len(clip_d_scores),
+                    # DINO
+                    'DINO-I': sum(dino_i_scores) / len(dino_i_scores),
+                    'DINO-D': sum(dino_d_scores) / len(dino_d_scores),
+                })
+    
+    del pipe; torch.cuda.empty_cache(); gc.collect()
+    return all_imgs
 
 
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
@@ -606,6 +786,9 @@ def main(args):
     if args.use_prior_loss: # Generate class images if prior preservation is enabled.
         cls_imgs_dir = Path(args.cls_data_dir)
         if not cls_imgs_dir.exists():
+            if args.report_to in ('wandb', 'all'): # add experiment info to cls_data_dir
+                args.cls_data_dir = f"{args.cls_data_dir}--{wnb_start_datetime}-{wnb_id}"
+                cls_imgs_dir = Path(args.cls_data_dir)
             cls_imgs_dir.mkdir(parents=True)
         cur_cls_imgs = len(list(cls_imgs_dir.iterdir()))
 
@@ -638,9 +821,9 @@ def main(args):
                 torch.cuda.empty_cache(); gc.collect()
 
     if acc.is_main_process: # Handle the repository creation
-        if args.out_dir is not None:
+        if args.save_model_weights and args.out_dir is not None:
             os.makedirs(args.out_dir, exist_ok=True)
-        if args.push_to_hub:
+        if args.save_model_weights and args.push_to_hub:
             repo_id = create_repo(repo_id=args.hub_model_id or Path(args.out_dir).name, exist_ok=True,
                                   token=args.hub_token).repo_id
 
@@ -687,7 +870,7 @@ def main(args):
 
     acc.register_save_state_pre_hook(save_model_hook); acc.register_load_state_pre_hook(load_model_hook)
 
-    vae.requires_grad_(False) if vae is not None else ()
+    vae.requires_grad_(False) if vae is not None else () # NOTE: not training VAE
     text_encoder.requires_grad_(False) if not args.train_text_encoder else ()
 
     if args.enable_xformers_memory_efficient_attention:
@@ -733,7 +916,7 @@ def main(args):
 
     # Optimizer creation
     params_to_optimize = (
-        itertools.chain(unet.parameters(), text_encoder.parameters()) if args.train_text_encoder else unet.parameters())
+        itertools.chain(unet.parameters(), text_encoder.parameters()) if args.train_text_encoder else unet.parameters()) # training unet and also text encoder if args.train_text_encoder is True
     opt = opt_cls(params_to_optimize, lr=args.lr, betas=(args.adam_beta1, args.adam_beta2),
                   weight_decay=args.adam_weight_decay, eps=args.adam_eps,)
 
@@ -1041,99 +1224,43 @@ def main(args):
                 break
 
     acc.wait_for_everyone()
-    if acc.is_main_process: # Create the pipeline using the trained modules and save it.
-        pipe_args = {}
-        if text_encoder is not None:
-            pipe_args["text_encoder"] = acc.unwrap_model(text_encoder)
-        if args.skip_save_text_encoder:
-            pipe_args["text_encoder"] = None
-        pipe = DiffusionPipeline.from_pretrained(args.pretrained_model_name_or_path, revision=args.revision,
-                                                 unet=acc.unwrap_model(unet), **pipe_args)
-        # We train on the simplified objective. If we're previously predicting a variance, we need the scheduler to ignore it
-        scheduler_args = {}
-        if "variance_type" in pipe.scheduler.config:
-            variance_type = pipe.scheduler.config.variance_type
-            if variance_type in ["learned", "learned_range"]:
-                variance_type = "fixed_small"
-            scheduler_args["variance_type"] = variance_type
-        pipe.scheduler = pipe.scheduler.from_config(pipe.scheduler.config, **scheduler_args)
-
-        if args.save_model_weights:
-            pipe.save_pretrained(args.out_dir)
-
-        # run inference
+    # finished training so delete SAM (if not deleted yet). NOTE: needed when masking prior loss.
+    sam_model, sam_processor = None, None
+    torch.cuda.empty_cache(); gc.collect()
+    if acc.is_main_process:
         hub_imgs = []
         if test_prompts and args.num_test_imgs_per_prompt > 0:
-            lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg').cuda()
-            clip_score = CLIPScore(model_name_or_path="openai/clip-vit-base-patch32").cuda()
-            clip_model, clip_processor = clip_score.model, clip_score.processor
+            with torch.no_grad():
+                hub_imgs = log_test(text_encoder, tokenizer, unet, vae, args, acc, weight_dtype,
+                                    test_prompts=test_prompts, epoch=epoch, ds=ds)
 
-            r_imgs = torch.stack([ds.img_transforms(im) for im in ds.pdm_imgs]).to(acc.device).clip(-1,1)
-            scaled_r_imgs = (r_imgs * 127.5 + 127.5).clip(0,255).to(torch.uint8) # [N,C,H,W]
+        if args.save_model_weights:
+            pipe_args = {}
+            if text_encoder is not None:
+                pipe_args["text_encoder"] = acc.unwrap_model(text_encoder)
+            if args.skip_save_text_encoder:
+                pipe_args["text_encoder"] = None
+            pipe = DiffusionPipeline.from_pretrained(args.pretrained_model_name_or_path, revision=args.revision,
+                                                    unet=acc.unwrap_model(unet), **pipe_args)
+            # We train on the simplified objective. If we're previously predicting a variance, we need the scheduler to ignore it
+            scheduler_args = {}
+            if "variance_type" in pipe.scheduler.config:
+                variance_type = pipe.scheduler.config.variance_type
+                if variance_type in ["learned", "learned_range"]:
+                    variance_type = "fixed_small"
+                scheduler_args["variance_type"] = variance_type
+            pipe.scheduler = pipe.scheduler.from_config(pipe.scheduler.config, **scheduler_args)
+            
+            pipe.save_pretrained(args.out_dir)
 
-            proc_r_imgs = clip_processor(text=None, images=scaled_r_imgs, return_tensors="pt", padding=True)
-            r_imgs_fs = clip_model.get_image_features(proc_r_imgs["pixel_values"].to('cuda'))
-            r_imgs_fs /= r_imgs_fs.norm(p=2, dim=-1, keepdim=True)
+            if args.push_to_hub:
+                save_model_card(repo_id, imgs=hub_imgs, base_model=args.pretrained_model_name_or_path,
+                                pipe=pipe, prompt=args.inst_prompt, train_text_encoder=args.train_text_encoder, repo_folder=args.out_dir)
+                upload_folder(repo_id=repo_id, folder_path=args.out_dir, commit_message="End of training",
+                              ignore_patterns=["step_*", "epoch_*"])
 
-            lpips_scores, clip_i_scores, clip_t_scores = [], [], []
-            for p in test_prompts:
-                gen = torch.Generator(device=acc.device).manual_seed(args.seed) if args.seed else None
-                imgs = [pipe(p, num_inference_steps=50, generator=gen).images[0]
-                        for _ in range(args.num_test_imgs_per_prompt)]
-                hub_imgs += imgs
-
-                for t in acc.trackers:
-                    if t.name == "tensorboard":
-                        np_imgs = np.stack([np.asarray(img) for img in imgs])
-                        t.writer.add_images("test", np_imgs, epoch, dataformats="NHWC")
-                    if t.name == "wandb":
-                        # log images to wandb
-                        t.log({"test": [wandb.Image(img, caption=f'{i}: {p}') for i,img in enumerate(imgs)]})
-                        # Clac Metrics
-                        t_imgs = torch.stack([ds.img_transforms(im) for im in imgs]).to(acc.device).clip(-1,1)
-                        scaled_t_imgs = (t_imgs * 127.5 + 127.5).clip(0,255).to(torch.uint8) # [N,C,H,W]
-                        # preprocess
-                        proc_t_imgs = clip_processor(
-                            text=p, images=scaled_t_imgs, return_tensors="pt", padding=True)
-                        # get img embeds
-                        t_imgs_fs = clip_model.get_image_features(proc_t_imgs["pixel_values"].to('cuda'))
-                        t_imgs_fs /= t_imgs_fs.norm(p=2, dim=-1, keepdim=True)
-                        # get txt embeds
-                        txt_fs = clip_model.get_text_features(
-                            proc_t_imgs["input_ids"].to('cuda'), proc_t_imgs["attention_mask"].to('cuda'))
-                        txt_fs /= txt_fs.norm(p=2, dim=-1, keepdim=True)
-
-                        # LPIPS (img-img)
-                        n_imgs = len(imgs) # num of generated images
-                        lpips_s = sum([
-                            lpips(t_imgs[i:i+1,:,:,:].repeat(r_imgs.shape[0],1,1,1), r_imgs).item() for i in range(n_imgs)
-                        ]) / n_imgs
-                        lpips_scores.append(lpips_s)
-                        # CLIP-I (img-img)
-                        cs_i = torch.matmul(t_imgs_fs, r_imgs_fs.T).clip(-1,1) # [-1,1]
-                        scaled_cs_i = cs_i * 0.5 + 0.5 # [0,1]
-                        clip_i_scores.append(scaled_cs_i.mean().item())
-                        # CLIP-T (txt-img)
-                        cs_t = torch.matmul(t_imgs_fs, txt_fs.T).clip(-1,1) # [-1,1]
-                        scaled_cs_t = cs_t * 0.5 + 0.5 # [0,1]
-                        clip_t_scores.append(scaled_cs_t.mean().item())
-            # log metrics to wandb
-            if args.report_to in ('wandb', 'all'):
-                for t in acc.trackers:
-                    if t.name == "wandb":
-                        t.log({
-                            'LPIPS': sum(lpips_scores) / len(lpips_scores),
-                            'CLIP_I': sum(clip_i_scores) / len(clip_i_scores),
-                            'CLIP_T': sum(clip_t_scores) / len(clip_t_scores),
-                        })
-
-        if args.push_to_hub:
-            save_model_card(repo_id, imgs=hub_imgs, base_model=args.pretrained_model_name_or_path, pipe=pipe,
-                            prompt=args.inst_prompt, train_text_encoder=args.train_text_encoder, repo_folder=args.out_dir)
-            upload_folder(repo_id=repo_id, folder_path=args.out_dir, commit_message="End of training",
-                          ignore_patterns=["step_*", "epoch_*"])
-        
-        if all([args.use_prior_loss, args.num_cls_imgs > 1, args.del_cls_imgs_dir]):
+        if all([args.del_cls_imgs_dir, args.use_prior_loss, args.num_cls_imgs > 0,
+                args.cls_data_dir is not None, os.listdir(args.cls_data_dir)]):
             shutil.rmtree(args.cls_data_dir)
 
     acc.end_training()

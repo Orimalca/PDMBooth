@@ -19,7 +19,7 @@ OBJECT = 'dog'
 CD_PROJ_DIR = f'cd {PROJ_DIR}; '
 RUN_LINE = (
     f'{CORTEX_DIR}/anaconda3/envs/pdm/bin/python -m accelerate.commands.launch ' +
-    f'{PROJ_DIR}/train_pdmbooth_lora.py '
+    f'{PROJ_DIR}/train_pdmbooth.py '
 )
 
 parser = argparse.ArgumentParser(description="Your script description here")
@@ -32,10 +32,13 @@ args = parser.parse_args()
 MODEL_ID = args.model_id
 MODEL_ID_PARSED = MODEL_ID.replace('/','_')
 OBJ_MODEL_DIR_NAME = f'{OBJECT}--{MODEL_ID_PARSED}'
-WANDB_PROJECT_NAME = f'PDMBooth_GridSearch_lora-{OBJ_MODEL_DIR_NAME}'
+WANDB_PROJECT_NAME = f'PDMBooth_GridSearch-{OBJ_MODEL_DIR_NAME}'
+MAX_TRAIN_STEPS = 700
 BASE_CFG = (
-    f"--lr=1e-4 --max_train_steps=700 --num_train_epochs=100 " +
-    f"--cls_prompt='A photo of {OBJECT}' --inst_prompt='A photo of sks {OBJECT}' --num_cls_imgs=1400 " +
+    f"--lr=1e-6 " +
+    f"--train_text_encoder " +
+    f"--max_train_steps={MAX_TRAIN_STEPS} " +
+    f"--cls_prompt='A photo of {OBJECT}' --inst_prompt='A photo of sks {OBJECT}' " +
     f"--inst_data_dir=./{OBJECT} " +
     f"--train_batch_size=1 --lr_warmup_steps=0 --ckpting_steps=1600 " +
     f"--report_to=wandb --seed=0 " +
@@ -44,11 +47,14 @@ BASE_CFG = (
     f"--cls_data_dir=./cls_imgs/{OBJ_MODEL_DIR_NAME} " +
     f"--features_data_dir=./pdm_features/{OBJ_MODEL_DIR_NAME} " +
     f"--trackers_proj_name={WANDB_PROJECT_NAME} " +
-    f"--out_dir=./ckpts/{WANDB_PROJECT_NAME}/exp "
+    f"--out_dir=./ckpts/{WANDB_PROJECT_NAME}/exp " +
     # losses
-    f"--use_inst_loss --use_pdm " +
-    f"--pdm_loss_weight=0.05 " +
-    # f"--mask_pdm --mask_dm " + # TODO: delete later
+    f"--use_inst_loss " +
+    # f"--use_pdm " +
+    # f"--pdm_loss_weight=0.05 " +
+    f"--use_prior_loss --num_cls_imgs={MAX_TRAIN_STEPS} " +
+    # f"--use_prior_loss --num_cls_imgs=1000 " +
+    # f"--mask_pdm --mask_dm --mask_prior " +
     # test prompts
     f"--test_prompts='A photo of sks {OBJECT} in a bucket' " +
     f"--test_prompts='A photo of sks {OBJECT} sleeping' " +
@@ -85,18 +91,23 @@ def run(combs, gpu):
             BASE_CFG + COMB_PARAMS
         )
 
-        print(cmd)
-        # os.system(cmd)
+        # print(cmd)
+        os.system(cmd)
 
 
 def process_batch(gpu, batch):
     run(combs=batch, gpu=gpu)
 
 
-def main_batch(combs, gpus):    
+def main_batch(gpus, combs=[dict()]):
     total_num_runs = len(combs)
+    
     num_gpus = len(gpus) # number of available GPUs
-    batch_size = total_num_runs // num_gpus  # Calculate the size of each batch
+    if total_num_runs < num_gpus: # in case number of available GPUs is greater than total number of runs
+        gpus = gpus[:total_num_runs] # use only the first total_num_runs GPUs
+    num_gpus = len(gpus) # number of GPUs we'll use
+    batch_size = total_num_runs // num_gpus # Calculate the size of each batch
+
     batches_gpus = [combs[i:i+batch_size] for i in range(0, total_num_runs, batch_size)]
     
     with ProcessPoolExecutor(max_workers=num_gpus) as executor:
@@ -111,7 +122,6 @@ def main_batch(combs, gpus):
 if __name__ == '__main__':
     ############################################ OPTION 1 ############################################
     # PARAMS_GRID = {
-    #     'model_id': ['runwayml/stable-diffusion-v1-5', 'CompVis/stable-diffusion-v1-4'],
     #     'train_text_encoder': [True, False],
     #     'use_inst_loss': [True, False], 'use_pdm': [True, False], 'use_prior_loss': [True, False],
     #     'mask_dm': [True, False], 'mask_pdm': [True, False], 'mask_prior': [True, False],
@@ -133,11 +143,15 @@ if __name__ == '__main__':
         # (1) use_pdm and use_inst_loss are always True
         # (2) model_id is given as a parameter to this script
         # (3) train_text_encoder is always False since training the text encoder always cause overfitting
-        # 'mask_dm': [True, False], 'mask_pdm': [True, False],
-        # 'use_prior_loss': [True, False], 'mask_prior': [True, False],
+        'mask_dm': [True, False], # 'mask_pdm': [True, False],
+        'mask_prior': [True, False],
+        # 'pdm_loss_weight': [0.05, 0.1],
+        # 'max_train_steps': [700, 800, 900, 1000]
+        # 'lr': [0.000001, 0.0000008]
     }
     # filters = [
-    #     lambda c: not (not c['use_prior_loss'] and c['mask_prior']),
+    #     # lambda c: not (not c['use_prior_loss'] and c['mask_prior']),
+    #     lambda c: not (not c['mask_dm'] and not c['mask_prior']),
     # ]
 
     combs = list(ParameterGrid(PARAMS_GRID)) # Generate all combinations
@@ -147,6 +161,5 @@ if __name__ == '__main__':
     # for c in combs: # Print or process the filtered combinations
     #     print(c)
     # print(f'A total of {len(combs)} combinations.')
-    # print('\n')
 
-    main_batch(combs, gpus=args.gpus)
+    main_batch(combs=combs, gpus=args.gpus)

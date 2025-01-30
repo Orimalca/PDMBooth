@@ -1,9 +1,8 @@
 objects: # (subject_name, class, is it a live object or not)
 # Objects:
-  # - ['backpack', 'backpack', '0']
+  - ['backpack', 'backpack', '0']
   - ['backpack_dog', 'backpack', '0']
-  - ['bear_plushie', 'dog', '0']
-  - ['dog', 'stuffed animal', '0']
+  - ['bear_plushie', 'stuffed animal', '0']
   - ['berry_bowl', 'bowl', '0']
   - ['can', 'can', '0']
   - ['candle', 'candle', '0']
@@ -20,8 +19,8 @@ objects: # (subject_name, class, is it a live object or not)
   - ['robot_toy', 'toy', '0']
   - ['shiny_sneaker', 'sneaker', '0']
   - ['teapot', 'teapot', '0']
-  - ['wolf_plushie', 'stuffed animal', '0']
   - ['vase', 'vase', '0']
+  - ['wolf_plushie', 'stuffed animal', '0']
 # Live Subjects:
   - ['dog', 'dog', '1']
   - ['dog2', 'dog', '1']

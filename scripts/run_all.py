@@ -18,7 +18,7 @@ DATASET_DIR = f'{PROJ_DIR}/dataset'
 CD_PROJ_DIR = f'cd {PROJ_DIR}; '
 RUN_LINE = (
     f'{CORTEX_DIR}/anaconda3/envs/pdm/bin/python -m accelerate.commands.launch ' +
-    f'{PROJ_DIR}/train_pdmbooth_lora.py '
+    f'{PROJ_DIR}/train_pdmbooth.py '
 )
 
 parser = argparse.ArgumentParser(description="Your script description here")
@@ -31,21 +31,25 @@ args = parser.parse_args()
 
 with open(args.path_to_yaml, 'r') as file:
     data = yaml.safe_load(file)
-OBJECTS = data['objects']
+OBJECTS = data['objects'] # NOTE: we have a total of 30 objects so choose number of GPUs accordingly
 OBJECTS_PROMPTS = [l[0] for l in data['objects_prompts']]
 LIVE_SUBJECTS_PROMPTS = [l[0] for l in data['live_subjects_prompts']]
 UNIQUE_TOKEN = args.unique_token
-WANDB_PROJECT_NAME = f'PDMBooth-lora-dreambooth-ds' # TODO: create folder
+WANDB_PROJECT_NAME = f'PDMBooth-dreambooth-ds'
+MAX_TRAIN_STEPS = 700
 BASE_CFG = (
-    f"--lr=1e-4 --max_train_steps=700 " +
-    f"--train_batch_size=1 --lr_warmup_steps=0 --ckpting_steps=1600 " +
-    f"--report_to=wandb --seed=0 " +
-    f"--pretrained_model_name_or_path=runwayml/stable-diffusion-v1-5 " +
-    f"--trackers_proj_name={WANDB_PROJECT_NAME} " +
-    # f"--mask_pdm --mask_dm " +
-    f"--mask_dm " +
-    # f"--use_pdm --pdm_loss_weight=0.05 " +
-    f"--use_inst_loss "
+    f"--lr=1e-6 --train_text_encoder --max_train_steps={MAX_TRAIN_STEPS} " +
+    f"--train_batch_size=1 --lr_warmup_steps=0 --ckpting_steps={2*MAX_TRAIN_STEPS} " +
+    f"--pretrained_model_name_or_path=runwayml/stable-diffusion-v1-5 " +    
+    f"--seed=0 --report_to=wandb --trackers_proj_name={WANDB_PROJECT_NAME} " +
+
+    f"--use_pdm " +
+
+    # f"--mask_dm " +
+    # f"--mask_pdm " +
+    # f"--mask_prior " +
+    
+    f"--use_inst_loss --use_prior_loss --num_cls_imgs={MAX_TRAIN_STEPS} --del_cls_imgs_dir "
 )
 
 
@@ -60,7 +64,8 @@ def run(objects, gpu):
             f"--inst_prompt='A photo of {UNIQUE_TOKEN} {subject_class}' " +
             f"--cls_prompt='A photo of {subject_class}' " +
             f"--inst_data_dir={DATASET_DIR}/{subject_name} " +
-            f"--out_dir=./ckpts/{WANDB_PROJECT_NAME}/{subject_name} "
+            f"--cls_data_dir={PROJ_DIR}/cls_imgs/{subject_name} " +
+            f"--out_dir={PROJ_DIR}/ckpts/{WANDB_PROJECT_NAME}/{subject_name} "
         )
         
         test_prompts = OBJECTS_PROMPTS if obj[2] == '0' else LIVE_SUBJECTS_PROMPTS
