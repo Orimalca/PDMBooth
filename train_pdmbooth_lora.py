@@ -59,15 +59,15 @@ logger = get_logger(__name__)
 
 
 
-
+@torch.no_grad()
 def extract_pdm_fs(pipe, img, prompt, device='cuda'):
     ctrl = AttentionStore()
     num_inv_steps, num_recon_steps = 999, 999
     inv_latents, _ = pipe.invert(prompt, image=img, num_inference_steps=num_inv_steps,
-                                 guidance_scale=1.0, deterministic=True)
+                                guidance_scale=1.0, deterministic=True)
     ptp_utils.register_attention_control_efficient_pdmbooth(pipe, ctrl)
     recon = pipe(prompt, latents=inv_latents, include_zero_timestep=True, guidance_scale=1.0,
-                 num_inference_steps=num_recon_steps)
+                num_inference_steps=num_recon_steps)
     layer_name = 'up_blocks_3_attentions_2_transformer_blocks_0_attn1_self' # layer name
     l_key = f"Q_{layer_name}"
     reversed_Q_features = [ctrl.attn_store[i][l_key][0] for i in ctrl.attn_store]
@@ -367,10 +367,10 @@ class PDMBoothDataset(Dataset):
         mask_p = transforms.ToPILImage(mode='L')(mask_t)
         return mask_p
 
+    @torch.no_grad()
     def get_mask(self, img, save=False, dir_n=None, mask_n=None, ext="png", in_pts=None, resize=True):
         inputs = self.sam_processor(img, input_points=in_pts, return_tensors="pt").to(self.device)
-        with torch.no_grad():
-            outputs = self.sam_model(**inputs)
+        outputs = self.sam_model(**inputs)
         masks = self.sam_processor.image_processor.post_process_masks(
             outputs.pred_masks.cpu(), inputs["original_sizes"].cpu(), inputs["reshaped_input_sizes"].cpu())
 
@@ -819,10 +819,8 @@ def main(args):
         inst_features_root=args.features_data_dir, save_pdm_fs=args.save_pdm_fs,
         sam_processor=sam_processor, sam_model=sam_model, device=acc.device,
     )
-    dl = torch.utils.data.DataLoader(
-        ds, batch_size=args.train_batch_size, shuffle=True, num_workers=args.dl_num_workers,
-        collate_fn=collate_fn,
-    )
+    dl = torch.utils.data.DataLoader(ds, batch_size=args.train_batch_size, shuffle=True,
+                                     num_workers=args.dl_num_workers, collate_fn=collate_fn)
 
     # Scheduler and math around the number of training steps.
     override_max_train_steps = False
@@ -851,19 +849,6 @@ def main(args):
     # recalc number of training epochs
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
-    if acc.is_main_process: # init trackers and store configs
-        init_kwargs = {}
-        if args.report_to in ('wandb', 'all'):
-            init_kwargs['wandb'] = {
-                'name': args.wandb_exp if args.wandb_exp else Path(args.out_dir).stem,
-                'dir': f'{os.path.dirname(__file__)}/{args.wandb_dir}',
-                'settings': wandb.Settings(x_disable_stats=True, x_disable_meta=True,
-                                           run_id=wnb_id, x_start_time=wnb_x_start_time),
-            }
-        trackers_cfg = vars(args)
-        test_prompts = trackers_cfg.pop('test_prompts') # `init_trackers` can't handle "list of strings" type
-        acc.init_trackers(args.trackers_proj_name, config=trackers_cfg, init_kwargs=init_kwargs)
-
     if acc.is_main_process:
         for i in range(ds.num_inst_imgs): # images and masks loop
             img = exif_transpose(Image.open(ds.inst_imgs_path[i]))
@@ -881,7 +866,7 @@ def main(args):
 
             rimg = ds.iresize(img)
             ds.inst_imgs.append(rimg)
-            ds.pdm_imgs.append(ds.ccrop(rimg)) if args.use_pdm_loss or test_prompts else ()
+            ds.pdm_imgs.append(ds.ccrop(rimg)) if args.use_pdm_loss or args.test_prompts else ()
 
     acc.wait_for_everyone() # NOTE: perhaps this line is redundant and can be removed
     if args.use_pdm_loss: # PDM setup
@@ -903,12 +888,27 @@ def main(args):
                 Q_fs = torch.load(ds.inst_features_path[i], map_location=acc.device)
             ds.pdm_fs.append(Q_fs)
         ds.pdm_fs = torch.stack(ds.pdm_fs)
+        torch.cuda.empty_cache(); gc.collect() # clean GPUs caches/memory after PDM features extraction
         # Register attn layer of PDM features
         ctrl = AttentionStore()
         attn_layer = unet.up_blocks[3].attentions[2].transformer_blocks[0].attn1
         attn_layer_name = 'up_blocks_3_attentions_2_transformer_blocks_0_attn1_self'
         ptp_utils.register_layer_pdmbooth(attn_layer, attn_layer_name, ctrl)
         l_key = f"Q_{attn_layer_name}"
+
+    if acc.is_main_process: # init trackers and store configs
+        init_kwargs = {}
+        if args.report_to in ('wandb', 'all'):
+            init_kwargs['wandb'] = {
+                'name': args.wandb_exp if args.wandb_exp else Path(args.out_dir).stem,
+                'dir': f'{os.path.dirname(__file__)}/{args.wandb_dir}',
+                'settings': wandb.Settings(x_disable_stats=True, x_disable_meta=True,
+                                           run_id=wnb_id, x_start_time=wnb_x_start_time),
+            }
+        trackers_cfg = vars(args)
+        test_prompts = trackers_cfg.pop('test_prompts') # `init_trackers` can't handle "list of strings" type
+        acc.init_trackers(args.trackers_proj_name, config=trackers_cfg, init_kwargs=init_kwargs)
+    acc.wait_for_everyone() # all processes should wait for wandb to initialize
 
     # Train!
     total_batch_size = args.train_batch_size * acc.num_processes * args.gradient_accumulation_steps
