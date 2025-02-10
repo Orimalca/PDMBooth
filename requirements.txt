@@ -1,0 +1,10 @@
+ftfy
+tensorboard
+Jinja2
+diffusers==0.18.2
+transformers==4.32.0
+matplotlib
+opencv-python
+accelerate>=0.16.0
+wandb
+torchmetrics

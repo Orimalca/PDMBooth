@@ -1,20 +1,39 @@
 # PDMBooth training example
 
-[PDMBooth](https://arxiv.org/abs/2208.12242) is a method to personalize text2image models like stable diffusion given just a few(3~5) images of a subject.
+PDMBooth is a method to personalize text2image models like stable diffusion given just a few(3~5) images of a subject.
 The `train_pdmbooth.py` script shows how to implement the training procedure and adapt it for stable diffusion.
 
 
 ## Running locally with PyTorch
 
-### Installing the dependencies
+### Installation
 
-Before running the scripts, make sure to install the library's training dependencies by running:
+<u>NOTE</u>: Please use CUDA 11.8
 
 ```bash
+conda create -y -n pdm python=3.11.10
+conda install --yes pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch-cuda=11.8 -c pytorch -c nvidia
 pip install -r requirements.txt
 ```
 
-And initialize an [🤗Accelerate](https://github.com/huggingface/accelerate/) environment with:
+If you tackle the following error:
+```bash
+ImportError: cannot import name 'cached_download' from 'huggingface_hub' (/cortex/users/orimalca/anaconda3/envs/pdm_temp1/lib/python3.11/site-packages/huggingface_hub/__init__.py)
+```
+
+That's a [well known bug](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522) in the `diffusers` library. To fix, remove `cached_download` from the import line in `<path_to_conda_env>/lib/python3.11/site-packages/diffusers/utils/dynamic_modules_utils.py` as explain [here](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522).
+
+Before the fix it should look as follows:
+```python
+from huggingface_hub import HfFolder, cached_download, hf_hub_download, model_info
+```
+
+After the fix it should look as follows:
+```python
+from huggingface_hub import HfFolder, hf_hub_download, model_info
+```
+
+After that, initialize an [🤗Accelerate](https://github.com/huggingface/accelerate/) environment with:
 
 ```bash
 accelerate config
@@ -181,7 +200,17 @@ accelerate launch train_pdmbooth_lora.py \
 - With the default hyperparameters from the above, the training seems to go in a positive direction.
 
 
+### Enable xFormers
+To enable xFormers for memory efficient attention, add `--enable_xformers_memory_efficient_attention` argument and run:
+```bash
+pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu118
+```
+
+
 ### Inference
 
 After training, LoRA weights can be loaded very easily into the original pipeline. First, you need to 
 load the original pipeline. Follow the inference script to see how.
+
+
+
