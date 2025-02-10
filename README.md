@@ -18,10 +18,10 @@ pip install -r requirements.txt
 
 If you tackle the following error:
 ```bash
-ImportError: cannot import name 'cached_download' from 'huggingface_hub' (/cortex/users/orimalca/anaconda3/envs/pdm_temp1/lib/python3.11/site-packages/huggingface_hub/__init__.py)
+ImportError: cannot import name 'cached_download' from 'huggingface_hub' (<path_to_your_conda_env>/lib/python3.11/site-packages/huggingface_hub/__init__.py)
 ```
 
-That's a [well known bug](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522) in the `diffusers` library. To fix, remove `cached_download` from the import line in `<path_to_conda_env>/lib/python3.11/site-packages/diffusers/utils/dynamic_modules_utils.py` as explain [here](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522).
+That's a [well known bug](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522) in the `diffusers` library. To fix, remove `cached_download` from the import line in `<path_to_your_conda_env>/lib/python3.11/site-packages/diffusers/utils/dynamic_modules_utils.py` as explain [here](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522).
 
 Before the fix it should look as follows:
 ```python
