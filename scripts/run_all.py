@@ -41,13 +41,13 @@ MAX_TRAIN_STEPS = 700
 BASE_CFG = (
     f"--lr=1e-6 --train_text_encoder --max_train_steps={MAX_TRAIN_STEPS} " +
     f"--train_batch_size=1 --lr_warmup_steps=0 --ckpting_steps={2*MAX_TRAIN_STEPS} " +
-    f"--pretrained_model_name_or_path=runwayml/stable-diffusion-v1-5 " +    
+    f"--pretrained_model_name_or_path=runwayml/stable-diffusion-v1-5 " +
     f"--seed=0 --report_to=wandb --trackers_proj_name={WANDB_PROJECT_NAME} " +
 
     f"--use_pdm " +
 
-    f"--mask_pdm " +
-    # f"--mask_dm " +
+    # f"--mask_pdm " +
+    f"--mask_dm " +
     # f"--mask_prior " +
 
     f"--use_inst_loss --use_prior_loss --num_cls_imgs={MAX_TRAIN_STEPS} "

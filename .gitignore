@@ -55,4 +55,5 @@ wandb/
 # Ignore specific Python files that might contain sensitive info or are scripts for personal use
 train_dreambooth.py
 train_dreambooth_lora.py
+pdm_utils/pdm_matching.py
 pdm_matching.py

@@ -38,10 +38,10 @@ from diffusers.optimization import get_scheduler
 from diffusers.utils import TEXT_ENCODER_ATTN_MODULE, check_min_version, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
 
-from StableDiffusionPipelineWithDDIMInversion import StableDiffusionPipelineWithDDIMInversion
+from pdm_utils.StableDiffusionPipelineWithDDIMInversion import StableDiffusionPipelineWithDDIMInversion
 from diffusers import DDIMScheduler
-from attention_store import AttentionStore
-import ptp_utils
+from pdm_utils.attention_store import AttentionStore
+from pdm_utils import ptp_utils
 from transformers import SamModel, SamProcessor
 from torchvision.transforms.functional import crop as torchvision_crop
 
@@ -285,7 +285,7 @@ class PDMBoothDataset(Dataset):
     def __init__(
         self, inst_data_root, inst_prompt, tokenizer, cls_data_root=None, cls_prompt=None, cls_num=None,
         size=512, center_crop=False, encoder_hidden_states=None, inst_prompt_encoder_hidden_states=None,
-        tokenizer_max_length=None, inst_features_root: str = None, save_pdm_fs: bool = None,
+        tokenizer_max_length=None, inst_features_root: str = None, save_pdm_fs: bool = False,
         do_extract_pdm_fs: bool = False, sam_processor: SamProcessor = None, sam_model: SamModel = None,
         device: torch.device | str = None
     ):
@@ -308,19 +308,20 @@ class PDMBoothDataset(Dataset):
 
         self.save_pdm_fs = save_pdm_fs
         self.do_extract_pdm_fs = do_extract_pdm_fs
-        if not inst_features_root or not Path(inst_features_root).exists():
-            self.do_extract_pdm_fs = True
-            self.inst_features_root = Path(str(self.inst_data_root) + "_pdm_features")
-            logger.info(
-                "Directory for PDM features of instance images not found (features will be generated " \
-                + (f"and saved to {self.inst_features_root}" if save_pdm_fs \
-                else "but won't be saved (locally) afterwards; if you wish to save them set save_pdm_fs argument to True") \
-                + ")"
-            )
-        else:
-            self.inst_features_root = inst_features_root
-            self.inst_features_path = list(Path(self.inst_features_root).iterdir())
-            logger.info("Directory for PDM features of instance images found. PDM features will be loaded from there.")
+        if args.use_pdm_loss:
+            if not inst_features_root or not Path(inst_features_root).exists():
+                self.do_extract_pdm_fs = True
+                self.inst_features_root = Path(str(self.inst_data_root) + "_pdm_features")
+                logger.info(
+                    "Directory for PDM features of instance images not found (features will be generated " \
+                    + (f"and saved to {self.inst_features_root}" if save_pdm_fs \
+                    else "but won't be saved (locally) afterwards; if you wish to save them set save_pdm_fs argument to True") \
+                    + ")"
+                )
+            else:
+                self.inst_features_root = inst_features_root
+                self.inst_features_path = list(Path(self.inst_features_root).iterdir())
+                logger.info("Directory for PDM features of instance images found. PDM features will be loaded from there.")
 
         self.inst_imgs_path = list(Path(inst_data_root).iterdir())
         self.num_inst_imgs = len(self.inst_imgs_path)
@@ -1118,6 +1119,7 @@ def main(args):
     acc.wait_for_everyone()
     # finished training so delete SAM (if not deleted yet). NOTE: needed when masking prior loss.
     sam_model, sam_processor = None, None
+    ds.pdm_fs = None # also delete PDM features (as we won't use them anymore)
     torch.cuda.empty_cache(); gc.collect()
     if acc.is_main_process:
         unet = unet.to(torch.float32)

@@ -55,64 +55,6 @@ class AttentionControl(abc.ABC):
         self.is_inject = False
 
 
-# class AttentionStore(AttentionControl):
-
-#     @staticmethod
-#     def get_empty_store():
-#         #return {"down_cross": [], "mid_cross": [], "up_cross": [],
-#         #        "down_self": [], "mid_self": [], "up_self": []}
-#         return {}
-
-#     def forward(self, attn, is_cross: bool, place_in_unet: str):
-#         key = f"{place_in_unet}_{'cross' if is_cross else 'self'}"
-#         if attn is None:
-#             attn = self.attn_store[self.cur_step][key]
-#         else:
-#             self.step_store[key] = attn.cpu()
-#         #if attn.shape[1] <= 32 ** 2:  # avoid memory overhead
-#         #    self.step_store[key].append(attn)
-#         return attn
-
-#     def between_steps(self):
-#         self.attn_store[self.cur_step - 1] = self.step_store
-#         # if len(self.attn_store) == 0:
-#         #     self.attn_store[self.cur_step-1] = self.step_store
-#         # else:
-#         #     for key in self.attn_store:
-#         #         for i in range(len(self.attn_store[key])):
-#         #             self.attn_store[key][i] += self.step_store[key][i]
-#         self.step_store = self.get_empty_store()
-
-#     def between_steps_inject(self):
-#         self.step_store = self.get_empty_store()
-
-#     def get_average_attention(self):
-#         average_attention = {key: [item / self.cur_step for item in self.attn_store[key]] for key in
-#                              self.attn_store}
-#         return average_attention
-
-#     def reset(self):
-#         super(AttentionStore, self).reset()
-#         self.step_store = self.get_empty_store()
-#         self.attn_store = {}
-
-#     def __init__(self):
-#         super(AttentionStore, self).__init__()
-#         self.step_store = self.get_empty_store()
-#         self.attn_store = {}
-
-
-
-
-
-
-
-
-
-
-
-
-
 class AttentionStore(AttentionControl):
 
     @staticmethod
