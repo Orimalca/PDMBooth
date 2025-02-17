@@ -20,7 +20,7 @@ conda install --yes pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch
 pip install -r requirements.txt
 ```
 
-If you tackle the following error:
+In case encountering the following error:
 ```bash
 ImportError: cannot import name 'cached_download' from 'huggingface_hub' (<path_to_your_conda_env>/lib/python3.11/site-packages/huggingface_hub/__init__.py)
 ```
