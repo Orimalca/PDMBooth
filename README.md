@@ -1,4 +1,4 @@
-# PDMBooth training example
+# PDMBooth
 
 PDMBooth is a method to personalize text2image models like stable diffusion given just a few(3~5) images of a subject.
 The `train_pdmbooth.py` script shows how to implement the training procedure and adapt it for stable diffusion.
