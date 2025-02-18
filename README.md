@@ -3,7 +3,7 @@
 PDMBooth is a method to personalize T2I Diffusion Models given just a few(3~5) images of a subject.
 The `train_pdmbooth.py` script shows how to implement the training procedure and adapt it for stable diffusion.
 
-⭐⭐ **<ins>NOTE</ins>: To view the full report of our work please refer to [THIS](https://drive.google.com/file/d/1VnbBZxBhipzK3Ncvo_dhEXOhXlUwIv0y/view?usp=sharing) link.** ⭐⭐
+⭐⭐ **<ins>NOTE</ins>: To view the full report of our work please refer to [THIS link](https://drive.google.com/file/d/1VnbBZxBhipzK3Ncvo_dhEXOhXlUwIv0y/view?usp=sharing).** ⭐⭐
 
 
 >**Abstract**: <br>
