@@ -133,7 +133,7 @@ python infer_pdmbooth.py \
   "false" \ # whether trained text_encoder as well when trained a LoRA
 ```
 
-## Running on the DreamBooth's Dataset
+## Running on DreamBooth's Dataset
 
 First, we need to fetch DreamBooth's dataset:
 
