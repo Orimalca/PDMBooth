@@ -133,9 +133,17 @@ python infer_pdmbooth.py \
   "false" \ # whether trained text_encoder as well when trained a LoRA
 ```
 
-## Running on the Dataset
+## Running on the DreamBooth's Dataset
 
-We also provide scripts to reproduce the quantitative results of our method on DreamBooth's dataset.
+First, we need to fetch DreamBooth's dataset:
+
+```bash
+git clone https://github.com/google/dreambooth.git # clone DreamBooth's dataset repo
+mv dreambooth/dataset . # move the dataset directory to our project directory
+rm -rf dreambooth # remove unnecessary from the clone
+```
+
+Now, we can use `scripts/run_all.py` to reproduce the quantitative results of our method on the dataset.
 
 <ins>NOTES Before Running</ins>: Make sure to check the following points before start running
 - Use the same python envrionment used for `train_pdmbooth.py`.

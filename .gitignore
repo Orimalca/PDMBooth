@@ -34,6 +34,7 @@ masks/
 pdm_features/
 results/
 wandb/
+dataset/
 
 # Ignore all markdown files except the main README
 *.md
