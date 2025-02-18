@@ -42,7 +42,7 @@ BASE_CFG = (
     f"--report_to=wandb --seed=0 " +
     f"--pretrained_model_name_or_path=runwayml/stable-diffusion-v1-5 " +
     f"--trackers_proj_name={WANDB_PROJECT_NAME} " +
-    f"--use_pdm " +
+    f"--use_pdm_loss " +
     f"--mask_pdm --mask_dm " +
     f"--use_inst_loss " # not using prior preservation when using LoRA
 )

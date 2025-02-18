@@ -8,11 +8,9 @@ The `train_pdmbooth.py` script shows how to implement the training procedure and
 
 <img width="1010" alt="Screenshot 2025-02-17 at 19 13 25" src="https://github.com/user-attachments/assets/1cda8d1b-f579-4890-8e81-a18aaa217a8d" />
 
-## Running locally with PyTorch
+## Installation
 
-### Installation
-
-<u>NOTE</u>: Please use CUDA 11.8
+<u>NOTE</u>: use CUDA 11.8
 
 ```bash
 conda create -y -n pdm python=3.11.10
@@ -20,130 +18,70 @@ conda install --yes pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch
 pip install -r requirements.txt
 ```
 
-In case encountering the following error:
-```bash
-ImportError: cannot import name 'cached_download' from 'huggingface_hub' (<path_to_your_conda_env>/lib/python3.11/site-packages/huggingface_hub/__init__.py)
-```
+<u>Important Note</u>: In case of encountering ```ImportError: cannot import name 'cached_download' from 'huggingface_hub' (<path_to_your_conda_env>/lib/python3.11/site-packages/huggingface_hub/__init__.py)```, that's a [well known bug](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522) in the `diffusers` library. To fix, remove `cached_download` from the import line in `<path_to_your_conda_env>/lib/python3.11/site-packages/diffusers/utils/dynamic_modules_utils.py` as explain [here](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522). In short:
 
-That's a [well known bug](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522) in the `diffusers` library. To fix, remove `cached_download` from the import line in `<path_to_your_conda_env>/lib/python3.11/site-packages/diffusers/utils/dynamic_modules_utils.py` as explain [here](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522).
-
-Before the fix it should look as follows:
 ```python
+# BEFORE the fix it should look as follows:
 from huggingface_hub import HfFolder, cached_download, hf_hub_download, model_info
-```
-
-After the fix it should look as follows:
-```python
+# AFTER the fix it should look like this:
 from huggingface_hub import HfFolder, hf_hub_download, model_info
 ```
 
-After that, initialize an [🤗Accelerate](https://github.com/huggingface/accelerate/) environment with:
+After that, initialize an [🤗Accelerate](https://github.com/huggingface/accelerate/) environment with one of the following options:
 
 ```bash
-accelerate config
-```
+### (OPTION 1): init accelerate and choose the specific configurations you want
+accelerate config # NOTE: specifying `torch compile mode` to True can cause dramatic speedups
 
-Or for a default accelerate configuration without answering questions about your environment
-
-```bash
+### (OPTION 2): default accelerate configuration (without answering questions)
 accelerate config default
-```
 
-Or if your environment doesn't support an interactive shell e.g. a notebook
-
-```python
+### (OPTION 3): if your env doesn't support an interactive shell (e.g., a notebook)
 from accelerate.utils import write_basic_config
 write_basic_config()
 ```
 
-When running `accelerate config`, if we specify torch compile mode to True there can be dramatic speedups. 
+## Training
 
-### Training
+Let's get our reference subject. For this example we'll use the dog images from [this](https://huggingface.co/datasets/diffusers/dog-example) link:
 
-Now let's get our reference subject. For this example we will use the dog images from [this](https://huggingface.co/datasets/diffusers/dog-example) link:
-
-Let's first download the example images locally:
+To download them locally you can use the following script:
 
 ```python
 from huggingface_hub import snapshot_download
-
-local_dir = "./dog"
-snapshot_download(
-    "diffusers/dog-example",
-    local_dir=local_dir, repo_type="dataset",
-    ignore_patterns=".gitattributes",
-)
+snapshot_download("diffusers/dog-example", local_dir="./dog",
+                  repo_type="dataset", ignore_patterns=".gitattributes")
 ```
 
-And launch the training using: (here we'll use [Stable Diffusion 1-5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5))
-
-**___Note: It is quite useful to monitor the training progress by regularly generating sample images during and after training. [wandb](https://docs.wandb.ai/quickstart) is a nice solution to easily see generated images during training. All you need to do is to run `pip install wandb` before training and pass `--report_to="wandb"` to automatically log images.___**
+Now, launch the training using:
 
 ```bash
 accelerate launch train_pdmbooth.py \
   --pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5" \
   --inst_data_dir=./dog \
-  --out_dir="path-to-save-model" \
-  --inst_prompt="a photo of sks dog" \
-  --cls_prompt="a photo of dog" \
-  --lr=1e-6 --max_train_steps=700 \
-  --train_batch_size=1 \
-  --lr_warmup_steps=0 \
+  --out_dir="ckpts/path-to-save-model" \
+  --inst_prompt="a photo of sks dog" --cls_prompt="a photo of dog" \
+  --lr=1e-6 --max_train_steps=700 --ckpting_steps=1400 --train_text_encoder \
+  --train_batch_size=1 --lr_warmup_steps=0 \
   --resolution=512 \
-  --seed=0
-```
-
-<u>Note</u>: Change the `resolution` to 768 if you want to use [stable-diffusion-2](https://huggingface.co/stabilityai/stable-diffusion-2) 768x768 model.
-
-### Training with prior-preservation loss
-
-Prior-preservation is used to avoid overfitting and language-drift. Refer to DreamBooth's paper to learn more about it. For prior-preservation we first generate images using the model with a class prompt and then use those during training along with our data.
-According to DreamBooth's paper, it's recommended to generate `num_epochs * num_samples` images for prior-preservation. 200-300 works well for most cases. The `num_cls_imgs` flag sets the number of images to generate with the class prompt. You can place existing images in `cls_data_dir`, and the training script will generate any additional images so that `num_cls_imgs` are present in `cls_data_dir` during training time.
-
-```bash
-accelerate launch train_pdmbooth.py \
-  --pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5" \
-  --inst_data_dir=./dog \
   --cls_data_dir="path-to-class-images" \
-  --out_dir="path-to-save-model" \
-  --use_prior_loss \
-  --inst_prompt="a photo of sks dog" \
-  --cls_prompt="a photo of dog" \
-  --train_batch_size=1 \
-  --gradient_accumulation_steps=1 \
-  --lr=1e-6 \
-  --lr_warmup_steps=0 \
+  --use_inst_loss --use_prior_loss --use_pdm --mask_pdm --mask_dm \
   --num_cls_imgs=700 \
-  --max_train_steps=700 \
-  --resolution=512 \
+  --report_to=wandb \
+  --test_prompts="A photo of sks dog in a bucket" \
+  --test_prompts="A photo of sks dog sleeping" \
+  --test_prompts="A photo of sks dog in the acropolis" \
+  --test_prompts="A photo of sks dog swimming" \
+  --test_prompts="A photo of sks dog getting a haircut" \
   --seed=0
 ```
 
-### Fine-tune text encoder with the UNet.
-
-The script also allows to fine-tune the `text_encoder` along with the `unet`. It's been observed experimentally that fine-tuning `text_encoder` gives much better results (especially on faces). 
-Pass the `--train_text_encoder` argument to the script to enable training the text encoder.
-
-<u>Note</u>: Training the text encoder requires more memory, with this option the training won't fit on 16GB GPU. It needs at least 24GB VRAM.
-
-```bash
-accelerate launch train_pdmbooth.py \
-  --pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5" \
-  --train_text_encoder \
-  --inst_data_dir=./dog \
-  --cls_data_dir="path-to-class-images" \
-  --out_dir="path-to-save-model" \
-  --use_prior_loss \
-  --inst_prompt="a photo of sks dog" \
-  --cls_prompt="a photo of dog" \
-  --resolution=512 \
-  --train_batch_size=1 \
-  --lr=1e-6 \
-  --lr_warmup_steps=0 \
-  --num_cls_imgs=700 \
-  --max_train_steps=700 \
-  --seed=0
-```
+<u>NOTES</u>:
+- We use [`wandb`](https://docs.wandb.ai/quickstart) to monitor training progress. If you want to disable it, simply remove the `report_to` and `test_prompts` arguments. We automatically plot the `test_prompts` in `wandb` framework. If you decide to not use `wandb` then you have to run inference afterwards, which means you'll need to save the model weights so add the `--save_model_weights` argument and then run the provided inference script under the inference section.
+- It's recommended to generate `max_train_steps` images for the prior-preservation objective. The `num_cls_imgs` flag sets the number of images to generate with the class prompt. You can also place existing images in `cls_data_dir`, and the training script will generate any additional images.
+- The script also fine-tunes the `text_encoder` along with the `unet`. Training the text encoder requires more memory, with this option the training won't fit on 16GB GPU. It needs at least 24GB VRAM. To disable this, simply don't pass the `--train_text_encoder` argument to the script.
+- Here we are using [Stable Diffusion 1-5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5). Change the `resolution` to 768 if you want to use [stable-diffusion-2](https://huggingface.co/stabilityai/stable-diffusion-2) 768x768 model.
+- To enable xFormers for memory efficient attention, run `pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu118` and add the `--enable_xformers_memory_efficient_attention` argument.
 
 ### Training with Low-Rank Adaptation (LoRA)
 
@@ -154,38 +92,32 @@ In a nutshell, LoRA allows to adapt pretrained models by adding pairs of rank-de
 - Rank-decomposition matrices have significantly fewer parameters than the original model, which means that trained LoRA weights are easily portable.
 - LoRA attention layers allow to control to which extent the model is adapted towards new training images via a `scale` parameter.
 
-Let's get started with a simple example. We'll re-use the dog example of the [previous section](#dog-example).
-
-We'll still use [Stable Diffusion 1-5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5).
+To run with LoRA use the `train_pdmbooth_lora.py` script as follows:
 
 ```bash
 accelerate launch train_pdmbooth_lora.py \
   --pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5" \
   --inst_data_dir=./dog \
-  --out_dir="path-to-save-model" \
-  --inst_prompt="a photo of sks dog" \
+  --out_dir="ckpts/path-to-save-model" \
+  --inst_prompt="a photo of sks dog" --cls_prompt="a photo of dog" \
   --resolution=512 \
-  --train_batch_size=1 \
-  --gradient_accumulation_steps=1 \
-  --ckpting_steps=100 \
-  --lr=1e-4 \
-  --report_to="wandb" \
-  --lr_warmup_steps=0 \
-  --max_train_steps=700 \
+  --use_inst_loss --use_pdm --mask_pdm --mask_dm \
+  --lr=1e-4 --max_train_steps=700 --ckpting_steps=1400 \
+  --train_batch_size=1 --lr_warmup_steps=0 \
+  --report_to=wandb \
+  --test_prompts="A photo of sks dog in a bucket" \
+  --test_prompts="A photo of sks dog sleeping" \
+  --test_prompts="A photo of sks dog in the acropolis" \
+  --test_prompts="A photo of sks dog swimming" \
+  --test_prompts="A photo of sks dog getting a haircut" \
   --seed=0
 ```
 
-**<u>Notes</u>**:
-- When using LoRA we can use a much higher learning rate compared to vanilla pdmbooth. Here we use *1e-4* instead of the usual *1e-6*.
-- The final LoRA embedding weights ~3MB in size which is orders of magnitudes smaller than the original model.
+<u>NOTES</u>:
+- The final LoRA embedding weights ~3MB in size which is orders of magnitudes smaller than the original model. Thus, when using LoRA we save the model weights by default, so no need to add the `--save_model_weights` argument.
+- When using LoRA we can use a much higher learning rate. Here we use *1e-4* instead of the usual *1e-6*.
 - Optionally, we can also train additional LoRA layers for the text encoder. Specify the `--train_text_encoder` argument above for that.
-- With the default hyperparameters from the above, the training seems to go in a positive direction.
-
-### Training with xFormers
-To enable xFormers for memory efficient attention, add `--enable_xformers_memory_efficient_attention` argument and run:
-```bash
-pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu118
-```
+- When using LoRA we don't utilize our prior preservation objective, so no need to pass arguments related to it.
 
 ## Inference
 
@@ -195,10 +127,10 @@ Once you have trained a model, you can run inference simply by using the provide
 python infer_pdmbooth.py \
   "0" \ # seed
   "dog" \ # object class
-  "path-to-saved-model" \ # path to weights dir
-  "true" \ # whether using LoRA or not
+  "relative_path_to_model" \ # path to model weights without 'ckpts/' parent
+  "false" \ # whether trained a LoRA or not
   "runwayml/stable-diffusion-v1-5" \ # model id
-  "true" \ # whether trained text_encoder as well when trained LORA
+  "false" \ # whether trained text_encoder as well when trained a LoRA
 ```
 
 ### Inference from a training checkpoint
@@ -208,9 +140,7 @@ You can also perform inference from one of the checkpoints saved during the trai
 
 ## Running on the Dataset
 
-We also provide scripts to reproduce the quantitative results of our method (presented in Table 1 in the report file)
-
-<u>NOTE</u>: For running on the entire dataset with LoRA, use `scripts/run_all_lora.py` instead.
+We also provide scripts to reproduce the quantitative results of our method on DreamBooth's dataset.
 
 <u>NOTES</u>: Make sure to check the following points before start running
 - Use the same python envrionment used for `train_pdmbooth.py`.
@@ -222,3 +152,4 @@ We also provide scripts to reproduce the quantitative results of our method (pre
 conda activate pdm
 python scripts/run_all.py "--gpus", "6", "7" # GPUs to use when running on the dataset
 ```
+<u>NOTE</u>: For running our method on the dataset with LoRA, use `scripts/run_all_lora.py` instead.

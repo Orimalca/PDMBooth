@@ -45,7 +45,7 @@ torch.cuda.manual_seed_all(SEED)
 GEN = torch.Generator(device=DEVICE).manual_seed(SEED)
 
 # Model parameters
-MODEL_ID = f"{BASE_DIR}/weights/{MODEL_WEIGHTS_DIR}"
+MODEL_ID = f"{BASE_DIR}/ckpts/{MODEL_WEIGHTS_DIR}"
 DTYPE = torch.float32 # OPTIONS: (torch.float16) / (torch.bfloat16) / (torch.float32)
 
 # Inference parameters
