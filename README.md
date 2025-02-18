@@ -10,6 +10,8 @@ The `train_pdmbooth.py` script shows how to implement the training procedure and
 
 ## Installation
 
+For installation please have `conda` properly installed and then run the following commands:
+
 <u>NOTE</u>: use CUDA 11.8
 
 ```bash
