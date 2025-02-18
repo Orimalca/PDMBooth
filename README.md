@@ -141,7 +141,7 @@ We also provide scripts to reproduce the quantitative results of our method on D
 - Use the same python envrionment used for `train_pdmbooth.py`.
 - A `wandb` project with the name `PDMBooth-dreambooth-ds` exists in `wandb` website (for LoRA use `PDMBooth-lora-dreambooth-ds`).
 - A directory with the name `/ckpts/PDMBooth-dreambooth-ds` exists (for LoRA use `/ckpts/PDMBooth-lora-dreambooth-ds`).
-- For each class in the dataset, the class images dir exists under the path `cls_imgs/object_class_name` (e.g., `cls_imgs/dog`). When using LoRA we can skip this step because we don't utilize our prior preservation objective when using LoRA.
+- For each class in the dataset, the class images directory exists under the path `cls_imgs/object_class_name` (e.g., `cls_imgs/dog`). When using LoRA we can skip this step because we don't utilize our prior preservation objective.
 
 <ins>NOTE on LoRA</ins>: For running our method on the dataset **with LoRA**, use `scripts/run_all_lora.py` instead.
 
