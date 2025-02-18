@@ -1,4 +1,5 @@
 import os
+from sys import executable as PATH_TO_PYTHON_ENV
 import yaml
 from numpy import random
 random.seed(0)
@@ -12,17 +13,16 @@ from concurrent.futures import ProcessPoolExecutor
 # (3) make sure to create class images dirs ahead
 ############################################################################################################
 
-CORTEX_DIR = '/cortex/users/orimalca'
-PROJ_DIR = f'{CORTEX_DIR}/projects/pdmbooth'
+PROJ_DIR = os.path.dirname(__file__)[:-len('/scripts')]
 DATASET_DIR = f'{PROJ_DIR}/dataset'
 
 CD_PROJ_DIR = f'cd {PROJ_DIR}; '
 RUN_LINE = (
-    f'{CORTEX_DIR}/anaconda3/envs/pdm/bin/python -m accelerate.commands.launch ' +
+    f'{PATH_TO_PYTHON_ENV} -m accelerate.commands.launch ' +
     f'{PROJ_DIR}/train_pdmbooth.py '
 )
 
-parser = argparse.ArgumentParser(description="Your script description here")
+parser = argparse.ArgumentParser(description="Script for running on dataset")
 parser.add_argument('--gpus', type=int, nargs='+', default=[0],
     help='List of GPU indices (For example: "--gpus", "0", "1", "4", "5", "6")')
 parser.add_argument('--unique_token', type=str, default='sks', help='The unique identifier to use')
@@ -32,7 +32,7 @@ args = parser.parse_args()
 
 with open(args.path_to_yaml, 'r') as file:
     data = yaml.safe_load(file)
-OBJECTS = data['objects'] # NOTE: we have a total of 30 objects so choose number of GPUs accordingly
+OBJECTS = data['objects'] # NOTE: we have a total of 30 objects so choose the number of GPUs accordingly
 OBJECTS_PROMPTS = [l[0] for l in data['objects_prompts']]
 LIVE_SUBJECTS_PROMPTS = [l[0] for l in data['live_subjects_prompts']]
 UNIQUE_TOKEN = args.unique_token
@@ -43,19 +43,14 @@ BASE_CFG = (
     f"--train_batch_size=1 --lr_warmup_steps=0 --ckpting_steps={2*MAX_TRAIN_STEPS} " +
     f"--pretrained_model_name_or_path=runwayml/stable-diffusion-v1-5 " +
     f"--seed=0 --report_to=wandb --trackers_proj_name={WANDB_PROJECT_NAME} " +
-
     f"--use_pdm " +
-
-    # f"--mask_pdm " +
-    f"--mask_dm " +
-    # f"--mask_prior " +
-
+    f"--mask_pdm --mask_dm " +
     f"--use_inst_loss --use_prior_loss --num_cls_imgs={MAX_TRAIN_STEPS} "
 )
 
 
 def run(objects, gpu):
-    GPU_LINE = f'export CUDA_VISIBLE_DEVICES={gpu}; MKL_THREADING_LAYER=GNU; '
+    GPU_LINE = f'export CUDA_VISIBLE_DEVICES={gpu}; export MKL_THREADING_LAYER=GNU; '
 
     for obj in objects:
         subject_name = obj[0]
@@ -72,7 +67,6 @@ def run(objects, gpu):
         test_prompts = OBJECTS_PROMPTS if obj[2] == '0' else LIVE_SUBJECTS_PROMPTS
         for prompt in test_prompts:
             OBJECT_PARAMS += f"--test_prompts='{prompt.format(UNIQUE_TOKEN, subject_class)}' "
-            # f"--test_prompts='A photo of sks {OBJECT} getting a haircut' "
         
         cmd = (
             CD_PROJ_DIR +

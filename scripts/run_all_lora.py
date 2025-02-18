@@ -1,4 +1,5 @@
 import os
+from sys import executable as PATH_TO_PYTHON_ENV
 import yaml
 from numpy import random
 random.seed(0)
@@ -11,17 +12,16 @@ from concurrent.futures import ProcessPoolExecutor
 # (2) make sure parent of checkpoint folder is created (as it will throw an error if not).
 ############################################################################################################
 
-CORTEX_DIR = '/cortex/users/orimalca'
-PROJ_DIR = f'{CORTEX_DIR}/projects/pdmbooth'
+PROJ_DIR = os.path.dirname(__file__)[:-len('/scripts')]
 DATASET_DIR = f'{PROJ_DIR}/dataset'
 
 CD_PROJ_DIR = f'cd {PROJ_DIR}; '
 RUN_LINE = (
-    f'{CORTEX_DIR}/anaconda3/envs/pdm/bin/python -m accelerate.commands.launch ' +
+    f'{PATH_TO_PYTHON_ENV} -m accelerate.commands.launch ' +
     f'{PROJ_DIR}/train_pdmbooth_lora.py '
 )
 
-parser = argparse.ArgumentParser(description="Your script description here")
+parser = argparse.ArgumentParser(description="Script for running on dataset")
 parser.add_argument('--gpus', type=int, nargs='+', default=[0],
     help='List of GPU indices (For example: "--gpus", "0", "1", "4", "5", "6")')
 parser.add_argument('--unique_token', type=str, default='sks', help='The unique identifier to use')
@@ -35,22 +35,21 @@ OBJECTS = data['objects']
 OBJECTS_PROMPTS = [l[0] for l in data['objects_prompts']]
 LIVE_SUBJECTS_PROMPTS = [l[0] for l in data['live_subjects_prompts']]
 UNIQUE_TOKEN = args.unique_token
-WANDB_PROJECT_NAME = f'PDMBooth-lora-dreambooth-ds' # TODO: create folder
+WANDB_PROJECT_NAME = f'PDMBooth-lora-dreambooth-ds'
 BASE_CFG = (
     f"--lr=1e-4 --max_train_steps=700 " +
     f"--train_batch_size=1 --lr_warmup_steps=0 --ckpting_steps=1600 " +
     f"--report_to=wandb --seed=0 " +
     f"--pretrained_model_name_or_path=runwayml/stable-diffusion-v1-5 " +
     f"--trackers_proj_name={WANDB_PROJECT_NAME} " +
-    # f"--mask_pdm --mask_dm " +
-    f"--mask_dm " +
-    # f"--use_pdm --pdm_loss_weight=0.05 " +
-    f"--use_inst_loss "
+    f"--use_pdm " +
+    f"--mask_pdm --mask_dm " +
+    f"--use_inst_loss " # not using prior preservation when using LoRA
 )
 
 
 def run(objects, gpu):
-    GPU_LINE = f'export CUDA_VISIBLE_DEVICES={gpu}; MKL_THREADING_LAYER=GNU; '
+    GPU_LINE = f'export CUDA_VISIBLE_DEVICES={gpu}; export MKL_THREADING_LAYER=GNU; '
 
     for obj in objects:
         subject_name = obj[0]
@@ -66,7 +65,6 @@ def run(objects, gpu):
         test_prompts = OBJECTS_PROMPTS if obj[2] == '0' else LIVE_SUBJECTS_PROMPTS
         for prompt in test_prompts:
             OBJECT_PARAMS += f"--test_prompts='{prompt.format(UNIQUE_TOKEN, subject_class)}' "
-            # f"--test_prompts='A photo of sks {OBJECT} getting a haircut' "
         
         cmd = (
             CD_PROJ_DIR +

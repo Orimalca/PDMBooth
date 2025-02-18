@@ -217,4 +217,19 @@ After training, LoRA weights can be loaded very easily into the original pipelin
 load the original pipeline. Follow the inference script to see how.
 
 
+## Running on the Dataset
 
+We also provide scripts to reproduce the quantitative results of our method (presented in Table 1 in the report file)
+
+<u>NOTE</u>: For running on the entire dataset with LoRA, use `scripts/run_all_lora.py` instead.
+
+<u>NOTES</u>: Make sure to check the following points before start running
+- Use the same python envrionment used for `train_pdmbooth.py`.
+- A `wandb` project with the name 'PDMBooth-dreambooth-ds' is exists (for LoRA use 'PDMBooth-lora-dreambooth-ds').
+- A directory with the name '/ckpts/PDMBooth-dreambooth-ds' exists (for LoRA use '/ckpts/PDMBooth-lora-dreambooth-ds').
+- For each class in the dataset, the class images dir exists under the path 'cls_imgs/object_class_name' (e.g., 'cls_imgs/dog'). When using LoRA we can skip this step because we don't utilize our prior preservation objective when using LoRA.
+
+```bash
+conda activate pdm
+python scripts/run_all.py "--gpus", "6", "7" # GPUs to use when running on the dataset
+```
