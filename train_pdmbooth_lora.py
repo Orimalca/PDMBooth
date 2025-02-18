@@ -1149,7 +1149,7 @@ def main(args):
         # run inference
         hub_imgs = []
         with torch.no_grad():
-            logger.info(f"Running test... \n Generating {args.num_test_imgs_per_prompt} for {len(test_prompts)} different prompts:")
+            logger.info(f"Running test... \n Generating {args.num_test_imgs_per_prompt} different images for {len(test_prompts)} different prompts:")
             if test_prompts and args.num_test_imgs_per_prompt > 0:
                 gen = torch.Generator(device=acc.device).manual_seed(args.seed) if args.seed else None
                 if args.report_to in ('wandb', 'all'):

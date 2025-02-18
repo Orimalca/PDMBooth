@@ -59,7 +59,7 @@ Now, launch the training using `train_pdmbooth.py` as follows:
 accelerate launch train_pdmbooth.py \
   --pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5" \
   --inst_data_dir=./dog \
-  --out_dir="ckpts/path-to-save-model" \
+  --out_dir="ckpts/relative_path_to_save_model" \
   --inst_prompt="a photo of sks dog" --cls_prompt="a photo of dog" \
   --lr=1e-6 --max_train_steps=700 --ckpting_steps=1400 --train_text_encoder \
   --train_batch_size=1 --lr_warmup_steps=0 \
@@ -98,7 +98,7 @@ To run with LoRA use the `train_pdmbooth_lora.py` script as follows:
 accelerate launch train_pdmbooth_lora.py \
   --pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5" \
   --inst_data_dir=./dog \
-  --out_dir="ckpts/path-to-save-model" \
+  --out_dir="ckpts/relative_path_to_save_model" \
   --inst_prompt="a photo of sks dog" --cls_prompt="a photo of dog" \
   --resolution=512 \
   --use_inst_loss --use_pdm --mask_pdm --mask_dm \
