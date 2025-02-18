@@ -140,7 +140,7 @@ First, we need to fetch DreamBooth's dataset:
 ```bash
 git clone https://github.com/google/dreambooth.git # clone DreamBooth's dataset repo
 mv dreambooth/dataset . # move the dataset directory to our project directory
-rm -rf dreambooth # remove unnecessary from the clone
+rm -rf dreambooth # remove the unnecessary leftovers from the clone
 ```
 
 Now, we can use `scripts/run_all.py` to reproduce the quantitative results of our method on the dataset.
