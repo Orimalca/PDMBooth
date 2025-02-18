@@ -12,7 +12,7 @@ The `train_pdmbooth.py` script shows how to implement the training procedure and
 
 For installation please have `conda` properly installed and then run the following commands:
 
-<u>NOTE</u>: use CUDA 11.8
+<ins>NOTE</ins>: use CUDA 11.8
 
 ```bash
 conda create -y -n pdm python=3.11.10
@@ -20,7 +20,7 @@ conda install --yes pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch
 pip install -r requirements.txt
 ```
 
-<u>Important Note</u>: In case of encountering ```ImportError: cannot import name 'cached_download' from 'huggingface_hub' (<path_to_your_conda_env>/lib/python3.11/site-packages/huggingface_hub/__init__.py)```, that's a [well known bug](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522) in the `diffusers` library. To fix, remove `cached_download` from the import line in `<path_to_your_conda_env>/lib/python3.11/site-packages/diffusers/utils/dynamic_modules_utils.py` as explain [here](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522). In short:
+<ins>**Important Note**</ins>: In case of encountering ```ImportError: cannot import name 'cached_download' from 'huggingface_hub' (<path_to_your_conda_env>/lib/python3.11/site-packages/huggingface_hub/__init__.py)```, that's a [well known bug](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522) in the `diffusers` library. To fix, remove `cached_download` from the import line in `<path_to_your_conda_env>/lib/python3.11/site-packages/diffusers/utils/dynamic_modules_utils.py` as explain [here](https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2425265522). In short:
 
 ```python
 # BEFORE the fix it should look as follows:
@@ -76,7 +76,7 @@ accelerate launch train_pdmbooth.py \
   --seed=0
 ```
 
-<u>NOTES</u>:
+<ins>NOTES</ins>:
 - We use [`wandb`](https://docs.wandb.ai/quickstart) to monitor training progress. If you want to disable it, simply remove the `report_to` and `test_prompts` arguments. We automatically plot the `test_prompts` in `wandb` framework. If you decide to not use `wandb` then you have to run inference afterwards, which means you'll need to save the model weights so add the `--save_model_weights` argument and then run the provided inference script under the inference section.
 - It's recommended to generate `max_train_steps` images for the prior-preservation objective. The `num_cls_imgs` flag sets the number of images to generate with the class prompt. You can also place existing images in `cls_data_dir`, and the training script will generate any additional images.
 - The script also fine-tunes the `text_encoder` along with the `unet`. Training the text encoder requires more memory, with this option the training won't fit on 16GB GPU. It needs at least 24GB VRAM. To disable this, simply don't pass the `--train_text_encoder` argument to the script.
@@ -113,7 +113,7 @@ accelerate launch train_pdmbooth_lora.py \
   --seed=0
 ```
 
-<u>NOTES</u>:
+<ins>NOTES</ins>:
 - The final LoRA embedding weights ~3MB in size which is orders of magnitudes smaller than the original model. Thus, when using LoRA we save the model weights by default, so no need to add the `--save_model_weights` argument.
 - When using LoRA we can use a much higher learning rate. Here we use *1e-4* instead of the usual *1e-6*.
 - Optionally, we can also train additional LoRA layers for the text encoder. Specify the `--train_text_encoder` argument above for that.
@@ -142,7 +142,7 @@ You can also perform inference from one of the checkpoints saved during the trai
 
 We also provide scripts to reproduce the quantitative results of our method on DreamBooth's dataset.
 
-<u>NOTES</u>: Make sure to check the following points before start running
+<ins>NOTES</ins>: Make sure to check the following points before start running
 - Use the same python envrionment used for `train_pdmbooth.py`.
 - A `wandb` project with the name `PDMBooth-dreambooth-ds` is exists (for LoRA use `PDMBooth-lora-dreambooth-ds`).
 - A directory with the name `/ckpts/PDMBooth-dreambooth-ds` exists (for LoRA use `/ckpts/PDMBooth-lora-dreambooth-ds`).
@@ -152,4 +152,4 @@ We also provide scripts to reproduce the quantitative results of our method on D
 conda activate pdm
 python scripts/run_all.py "--gpus", "6", "7" # GPUs to use when running on the dataset
 ```
-<u>NOTE</u>: For running our method on the dataset with LoRA, use `scripts/run_all_lora.py` instead.
+<ins>NOTE</ins>: For running our method on the dataset with LoRA, use `scripts/run_all_lora.py` instead.
