@@ -137,14 +137,17 @@ python infer_pdmbooth.py \
 
 We also provide scripts to reproduce the quantitative results of our method on DreamBooth's dataset.
 
-<ins>NOTES</ins>: Make sure to check the following points before start running
+<ins>NOTES Before Running</ins>: Make sure to check the following points before start running
 - Use the same python envrionment used for `train_pdmbooth.py`.
-- A `wandb` project with the name `PDMBooth-dreambooth-ds` is exists (for LoRA use `PDMBooth-lora-dreambooth-ds`).
+- A `wandb` project with the name `PDMBooth-dreambooth-ds` exists in `wandb` website (for LoRA use `PDMBooth-lora-dreambooth-ds`).
 - A directory with the name `/ckpts/PDMBooth-dreambooth-ds` exists (for LoRA use `/ckpts/PDMBooth-lora-dreambooth-ds`).
 - For each class in the dataset, the class images dir exists under the path `cls_imgs/object_class_name` (e.g., `cls_imgs/dog`). When using LoRA we can skip this step because we don't utilize our prior preservation objective when using LoRA.
+
+<ins>NOTE on LoRA</ins>: For running our method on the dataset **with LoRA**, use `scripts/run_all_lora.py` instead.
 
 ```bash
 conda activate pdm
 python scripts/run_all.py "--gpus", "6", "7" # GPUs to use when running on the dataset
 ```
-<ins>NOTE</ins>: For running our method on the dataset with LoRA, use `scripts/run_all_lora.py` instead.
+
+The script will automatically calculate the metrics for each object in the dataset and log it to `wandb` along with the generated images which has been used to measure the metrics. After running the script you can simply extract the mean and standard deviation of the metrics over all the objects in the dataset in `wandb` website using their built-in tools.
