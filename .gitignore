@@ -57,3 +57,7 @@ train_dreambooth.py
 train_dreambooth_lora.py
 pdm_utils/pdm_matching.py
 pdm_matching.py
+scripts/grid_search_lora.py
+scripts/grid_search.py
+grid_search_lora.py
+grid_search.py
