@@ -3,6 +3,9 @@
 PDMBooth is a method to personalize T2I Diffusion Models given just a few(3~5) images of a subject.
 The `train_pdmbooth.py` script shows how to implement the training procedure and adapt it for stable diffusion.
 
+⭐⭐ **<ins>NOTE</ins>: To view the full report of our work please refer to [THIS](https://drive.google.com/file/d/1VnbBZxBhipzK3Ncvo_dhEXOhXlUwIv0y/view?usp=sharing) link.** ⭐⭐
+
+
 >**Abstract**: <br>
 > Recent advances in T2I models have enabled high-quality personalized image synthesis of user-provided concepts with flexible textual control. In this work, we analyze the limitations of DreamBooth (DB), a primary technique in T2I personalization. As well as providing an alternative that can tackle those limitations. When integrating the learned concept into new prompts, DB tends to overfit the concept, which can be attributed to its coarse objective. We introduce PDMBooth, a novel approach that addresses this issue by integrating a semantic regularization term. Furthermore, we try experimenting with masking DB's objective. Compared to DB, our method demonstrates significant improvements in text alignment and similar results in identity preservation.
 
