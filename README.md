@@ -58,9 +58,9 @@ write_basic_config()
 
 When running `accelerate config`, if we specify torch compile mode to True there can be dramatic speedups. 
 
-### Dog example
+### Training
 
-Now let's get our dataset. For this example we will use the dog images from [this](https://huggingface.co/datasets/diffusers/dog-example) link:
+Now let's get our reference subject. For this example we will use the dog images from [this](https://huggingface.co/datasets/diffusers/dog-example) link:
 
 Let's first download the example images locally:
 
@@ -76,6 +76,8 @@ snapshot_download(
 ```
 
 And launch the training using: (here we'll use [Stable Diffusion 1-5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5))
+
+**___Note: It is quite useful to monitor the training progress by regularly generating sample images during and after training. [wandb](https://docs.wandb.ai/quickstart) is a nice solution to easily see generated images during training. All you need to do is to run `pip install wandb` before training and pass `--report_to="wandb"` to automatically log images.___**
 
 ```bash
 accelerate launch train_pdmbooth.py \
@@ -143,25 +145,7 @@ accelerate launch train_pdmbooth.py \
   --seed=0
 ```
 
-### Inference
-
-Once you have trained a model using the above command, you can run inference simply using the provided inference file as follows:
-
-```bash
-python infer_pdmbooth.py \
-  "0" \ # seed
-  "dog" \ # object class
-  "./temp" \ # path to saved model weights dir
-  "true" \ # whether using LoRA or not
-  "runwayml/stable-diffusion-v1-5" \ # model id
-  "true" \ # whether trained text_encoder as well when trained LORA
-```
-
-### Inference from a training checkpoint
-
-You can also perform inference from one of the checkpoints saved during the training process, if you used the `--ckpting_steps` argument. Please, refer to [DreamBooth's documentation](https://huggingface.co/docs/diffusers/v0.18.2/en/training/dreambooth#inference-from-a-saved-checkpoint) to see how to do it.
-
-## Training with Low-Rank Adaptation of Large Language Models (LoRA)
+### Training with Low-Rank Adaptation (LoRA)
 
 Low-Rank Adaption of Large Language Models was first introduced by Microsoft in [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685) by *Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, Weizhu Chen*
 
@@ -170,15 +154,9 @@ In a nutshell, LoRA allows to adapt pretrained models by adding pairs of rank-de
 - Rank-decomposition matrices have significantly fewer parameters than the original model, which means that trained LoRA weights are easily portable.
 - LoRA attention layers allow to control to which extent the model is adapted towards new training images via a `scale` parameter.
 
-### Training
-
 Let's get started with a simple example. We'll re-use the dog example of the [previous section](#dog-example).
 
 We'll still use [Stable Diffusion 1-5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5).
-
-**___Note: Change the `resolution` to 768 if you are using the [stable-diffusion-2](https://huggingface.co/stabilityai/stable-diffusion-2) 768x768 model.___**
-
-**___Note: It is quite useful to monitor the training progress by regularly generating sample images during training. [wandb](https://docs.wandb.ai/quickstart) is a nice solution to easily see generated images during training. All you need to do is to run `pip install wandb` before training and pass `--report_to="wandb"` to automatically log images.___**
 
 ```bash
 accelerate launch train_pdmbooth_lora.py \
@@ -203,18 +181,29 @@ accelerate launch train_pdmbooth_lora.py \
 - Optionally, we can also train additional LoRA layers for the text encoder. Specify the `--train_text_encoder` argument above for that.
 - With the default hyperparameters from the above, the training seems to go in a positive direction.
 
-
-### Enable xFormers
+### Training with xFormers
 To enable xFormers for memory efficient attention, add `--enable_xformers_memory_efficient_attention` argument and run:
 ```bash
 pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu118
 ```
 
+## Inference
 
-### Inference
+Once you have trained a model, you can run inference simply by using the provided inference script `infer_pdmbooth.py` as follows:
 
-After training, LoRA weights can be loaded very easily into the original pipeline. First, you need to 
-load the original pipeline. Follow the inference script to see how.
+```bash
+python infer_pdmbooth.py \
+  "0" \ # seed
+  "dog" \ # object class
+  "path-to-saved-model" \ # path to weights dir
+  "true" \ # whether using LoRA or not
+  "runwayml/stable-diffusion-v1-5" \ # model id
+  "true" \ # whether trained text_encoder as well when trained LORA
+```
+
+### Inference from a training checkpoint
+
+You can also perform inference from one of the checkpoints saved during the training process, if you used the `--ckpting_steps` argument. Please, refer to [DreamBooth's documentation](https://huggingface.co/docs/diffusers/v0.18.2/en/training/dreambooth#inference-from-a-saved-checkpoint) to see how to do it.
 
 
 ## Running on the Dataset
@@ -225,9 +214,9 @@ We also provide scripts to reproduce the quantitative results of our method (pre
 
 <u>NOTES</u>: Make sure to check the following points before start running
 - Use the same python envrionment used for `train_pdmbooth.py`.
-- A `wandb` project with the name 'PDMBooth-dreambooth-ds' is exists (for LoRA use 'PDMBooth-lora-dreambooth-ds').
-- A directory with the name '/ckpts/PDMBooth-dreambooth-ds' exists (for LoRA use '/ckpts/PDMBooth-lora-dreambooth-ds').
-- For each class in the dataset, the class images dir exists under the path 'cls_imgs/object_class_name' (e.g., 'cls_imgs/dog'). When using LoRA we can skip this step because we don't utilize our prior preservation objective when using LoRA.
+- A `wandb` project with the name `PDMBooth-dreambooth-ds` is exists (for LoRA use `PDMBooth-lora-dreambooth-ds`).
+- A directory with the name `/ckpts/PDMBooth-dreambooth-ds` exists (for LoRA use `/ckpts/PDMBooth-lora-dreambooth-ds`).
+- For each class in the dataset, the class images dir exists under the path `cls_imgs/object_class_name` (e.g., `cls_imgs/dog`). When using LoRA we can skip this step because we don't utilize our prior preservation objective when using LoRA.
 
 ```bash
 conda activate pdm
