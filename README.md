@@ -150,4 +150,4 @@ conda activate pdm
 python scripts/run_all.py "--gpus", "6", "7" # GPUs to use when running on the dataset
 ```
 
-The script will automatically calculate the metrics for each object in the dataset and log it to `wandb` along with the generated images which has been used to measure the metrics. After running the script you can simply extract the mean and standard deviation of the metrics over all the objects in the dataset in `wandb` website using their built-in tools.
+The script will automatically calculate the metrics for each object in the dataset and log it to `wandb` along with the generated images which has been used to measure the metrics. After running the script, you can simply extract the mean and standard deviation of the metrics over all the objects in the dataset inside `wandb` website using their built-in tools.
