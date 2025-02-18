@@ -35,6 +35,7 @@ pdm_features/
 results/
 wandb/
 dataset/
+dreambooth/
 
 # Ignore all markdown files except the main README
 *.md
