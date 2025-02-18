@@ -8,7 +8,7 @@ The `train_pdmbooth.py` script shows how to implement the training procedure and
 
 <img width="1010" alt="Screenshot 2025-02-17 at 19 13 25" src="https://github.com/user-attachments/assets/1cda8d1b-f579-4890-8e81-a18aaa217a8d" />
 
-## Installation
+## Environment Setup & Installation
 
 For installation please have `conda` properly installed and then run the following commands:
 
@@ -45,9 +45,7 @@ write_basic_config()
 
 ## Training
 
-Let's get our reference subject. For this example we'll use the dog images from [this](https://huggingface.co/datasets/diffusers/dog-example) link:
-
-To download them locally you can use the following script:
+Let's get our reference subject. We'll use the dog images from [this](https://huggingface.co/datasets/diffusers/dog-example) link. To download them locally you can use the following script:
 
 ```python
 from huggingface_hub import snapshot_download
@@ -55,7 +53,7 @@ snapshot_download("diffusers/dog-example", local_dir="./dog",
                   repo_type="dataset", ignore_patterns=".gitattributes")
 ```
 
-Now, launch the training using:
+Now, launch the training using `train_pdmbooth.py` as follows:
 
 ```bash
 accelerate launch train_pdmbooth.py \
