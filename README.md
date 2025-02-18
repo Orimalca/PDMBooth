@@ -133,11 +133,6 @@ python infer_pdmbooth.py \
   "false" \ # whether trained text_encoder as well when trained a LoRA
 ```
 
-### Inference from a training checkpoint
-
-You can also perform inference from one of the checkpoints saved during the training process, if you used the `--ckpting_steps` argument. Please, refer to [DreamBooth's documentation](https://huggingface.co/docs/diffusers/v0.18.2/en/training/dreambooth#inference-from-a-saved-checkpoint) to see how to do it.
-
-
 ## Running on the Dataset
 
 We also provide scripts to reproduce the quantitative results of our method on DreamBooth's dataset.
