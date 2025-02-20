@@ -9,7 +9,7 @@ The `train_pdmbooth.py` script shows how to implement the training procedure and
 >**Abstract**: <br>
 > Recent advances in T2I models have enabled high-quality personalized image synthesis of user-provided concepts with flexible textual control. In this work, we analyze the limitations of DreamBooth (DB), a primary technique in T2I personalization. As well as providing an alternative that can tackle those limitations. When integrating the learned concept into new prompts, DB tends to overfit the concept, which can be attributed to its coarse objective. We introduce PDMBooth, a novel approach that addresses this issue by integrating a semantic regularization term. Furthermore, we try experimenting with masking DB's objective. Compared to DB, our method demonstrates significant improvements in text alignment and similar results in identity preservation.
 
-<img width="1010" alt="Screenshot 2025-02-17 at 19 13 25" src="https://github.com/user-attachments/assets/1cda8d1b-f579-4890-8e81-a18aaa217a8d" />
+<img width="1195" alt="pdmbooth" src="https://github.com/user-attachments/assets/a7ebe2bf-69f0-40ae-920e-37a5f5185376" />
 
 ## Environment Setup & Installation
 
